@@ -126,7 +126,7 @@ func Load() (*Config, error) {
 		},
 		Bot: Bot{
 			Handle:          envString("BOT_HANDLE", "ekravo-review"),
-			RepoURL:         envString("REPO_URL", "https://github.com/EOSKILLZ/ekravo-review"),
+			RepoURL:         envString("REPO_URL", "https://github.com/ekravo/Ekravo-review"),
 			AutoApprove:     envBool("AUTO_APPROVE", false),
 			AutoMerge:       envBool("AUTO_MERGE", false),
 			AutoMergeMethod: strings.ToLower(envString("AUTO_MERGE_METHOD", "merge")),

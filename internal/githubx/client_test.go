@@ -34,10 +34,10 @@ func TestAppAuthCreatesInstallationTokenAndFetchesPR(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/app/installations":
+		case r.URL.Path == "/repos/o/r/installation":
 			auth := r.Header.Get("Authorization")
 			jwtSeen = strings.HasPrefix(auth, "Bearer eyJ")
-			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": 7}})
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": 7})
 
 		case r.URL.Path == "/app/installations/7/access_tokens":
 			_ = json.NewEncoder(w).Encode(map[string]any{
@@ -81,6 +81,114 @@ func TestAppAuthCreatesInstallationTokenAndFetchesPR(t *testing.T) {
 	}
 	if !tokenSeen {
 		t.Error("PR call did not use the installation token")
+	}
+}
+
+func TestAppUsesTheInstallationThatOwnsEachRepo(t *testing.T) {
+	minted := map[string]int{}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/o/one/installation":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": 7})
+		case "/repos/o/two/installation":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": 9})
+		case "/app/installations/7/access_tokens":
+			minted["one"]++
+			_ = json.NewEncoder(w).Encode(map[string]any{"token": "token-a", "expires_at": time.Now().Add(time.Hour)})
+		case "/app/installations/9/access_tokens":
+			minted["two"]++
+			_ = json.NewEncoder(w).Encode(map[string]any{"token": "token-b", "expires_at": time.Now().Add(time.Hour)})
+		case "/repos/o/one/pulls/1":
+			if got := r.Header.Get("Authorization"); got != "Bearer token-a" {
+				t.Errorf("o/one used %q", got)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"number": 1, "title": "One", "head": map[string]any{"sha": "a"}})
+		case "/repos/o/two/pulls/2":
+			if got := r.Header.Get("Authorization"); got != "Bearer token-b" {
+				t.Errorf("o/two used %q", got)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"number": 2, "title": "Two", "head": map[string]any{"sha": "b"}})
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	c, err := New(config.GitHub{AppID: 42, PrivateKeyPEM: testKeyPEM(t), BaseURL: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		repo string
+		n    int
+	}{{"o/one", 1}, {"o/two", 2}, {"o/one", 1}} {
+		if _, err := c.GetPullRequest(context.Background(), tc.repo, tc.n); err != nil {
+			t.Fatalf("%s#%d: %v", tc.repo, tc.n, err)
+		}
+	}
+	if minted["one"] != 1 || minted["two"] != 1 {
+		t.Fatalf("minted = %v, want one token per installation", minted)
+	}
+}
+
+func TestListReposUnionsInstallations(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/app/installations":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": 7}, {"id": 9}})
+		case "/app/installations/7/access_tokens":
+			_ = json.NewEncoder(w).Encode(map[string]any{"token": "token-a", "expires_at": time.Now().Add(time.Hour)})
+		case "/app/installations/9/access_tokens":
+			_ = json.NewEncoder(w).Encode(map[string]any{"token": "token-b", "expires_at": time.Now().Add(time.Hour)})
+		case "/installation/repositories":
+			switch r.Header.Get("Authorization") {
+			case "Bearer token-a":
+				_ = json.NewEncoder(w).Encode(map[string]any{"total_count": 2, "repositories": []map[string]any{
+					{"full_name": "o/one"}, {"full_name": "o/archived", "archived": true},
+				}})
+			case "Bearer token-b":
+				_ = json.NewEncoder(w).Encode(map[string]any{"total_count": 1, "repositories": []map[string]any{
+					{"full_name": "ekravo/Ekravo-review"},
+				}})
+			default:
+				t.Errorf("unexpected token %q", r.Header.Get("Authorization"))
+				_ = json.NewEncoder(w).Encode(map[string]any{"total_count": 0, "repositories": []any{}})
+			}
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	c, err := New(config.GitHub{AppID: 42, PrivateKeyPEM: testKeyPEM(t), BaseURL: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repos, err := c.ListRepos(context.Background())
+	if err != nil {
+		t.Fatalf("ListRepos: %v", err)
+	}
+	want := []string{"ekravo/Ekravo-review", "o/one"}
+	if strings.Join(repos, ",") != strings.Join(want, ",") {
+		t.Fatalf("repos = %v, want %v", repos, want)
+	}
+}
+
+func TestRepoWithoutInstallationReportsIt(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler())
+	defer srv.Close()
+
+	c, err := New(config.GitHub{AppID: 42, PrivateKeyPEM: testKeyPEM(t), BaseURL: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.GetPullRequest(context.Background(), "o/r", 1); err == nil ||
+		!strings.Contains(err.Error(), "not installed") {
+		t.Fatalf("err = %v, want a not-installed error", err)
 	}
 }
 

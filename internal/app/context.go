@@ -36,8 +36,8 @@ func (g ghSource) FileAt(ctx context.Context, repo, path, ref string) ([]byte, e
 	return g.c.FileAt(ctx, repo, path, ref)
 }
 
-func (g ghSource) GitAuth(ctx context.Context) (string, error) {
-	return g.c.GitAuthHeader(ctx)
+func (g ghSource) GitAuth(ctx context.Context, repo string) (string, error) {
+	return g.c.GitAuthHeader(ctx, repo)
 }
 
 func newContextEngine(cfg *config.Config, gh *githubx.Client, log *slog.Logger) (*repocontext.Engine, error) {

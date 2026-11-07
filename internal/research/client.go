@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	userAgent        = "ekravo-review-v2 (+https://github.com/EOSKILLZ/ekravo-review)"
+	userAgent        = "ekravo-review-v2 (+https://github.com/ekravo/Ekravo-review)"
 	maxResponseBytes = 4 << 20
 	cacheTTL         = time.Hour
 	cacheMax         = 256

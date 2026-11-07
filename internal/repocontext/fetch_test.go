@@ -30,7 +30,7 @@ func (f *fakeSource) Tree(context.Context, string, string) ([]TreeEntry, error) 
 func (f *fakeSource) FileAt(context.Context, string, string, string) ([]byte, error) {
 	return nil, nil
 }
-func (f *fakeSource) GitAuth(context.Context) (string, error) { return "", nil }
+func (f *fakeSource) GitAuth(context.Context, string) (string, error) { return "", nil }
 
 func makeTar(t *testing.T, prefix string, entries map[string]string) []byte {
 	t.Helper()

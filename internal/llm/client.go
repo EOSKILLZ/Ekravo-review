@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	userAgent        = "ekravo-review-v2 (+https://github.com/EOSKILLZ/ekravo-review)"
+	userAgent        = "ekravo-review-v2 (+https://github.com/ekravo/Ekravo-review)"
 	downCooldown     = 10 * time.Minute
 	badJSONCooldown  = 5 * time.Minute
 	maxResponseBytes = 8 << 20

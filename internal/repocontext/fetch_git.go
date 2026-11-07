@@ -31,7 +31,7 @@ func fetchGit(ctx context.Context, src Source, repo, ref, dir string, changed []
 		return err
 	}
 
-	auth, _ := src.GitAuth(ctx)
+	auth, _ := src.GitAuth(ctx, repo)
 	env := []string{
 		"GIT_TERMINAL_PROMPT=0",
 		"GIT_ASKPASS=",

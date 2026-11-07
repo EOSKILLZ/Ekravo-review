@@ -28,7 +28,7 @@ func (s testSource) Tree(context.Context, string, string) ([]repocontext.TreeEnt
 func (s testSource) FileAt(context.Context, string, string, string) ([]byte, error) {
 	return nil, nil
 }
-func (s testSource) GitAuth(context.Context) (string, error) { return "", nil }
+func (s testSource) GitAuth(context.Context, string) (string, error) { return "", nil }
 
 func testTar(t *testing.T) []byte {
 	t.Helper()

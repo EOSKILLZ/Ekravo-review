@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,7 +26,7 @@ import (
 	"github.com/EOSKILLZ/ekravo-review/v2/internal/config"
 )
 
-const userAgent = "ekravo-review-v2 (+https://github.com/EOSKILLZ/ekravo-review)"
+const userAgent = "ekravo-review-v2 (+https://github.com/ekravo/Ekravo-review)"
 
 // ErrNotFound is returned for HTTP 404.
 var ErrNotFound = errors.New("not found")
@@ -48,10 +49,24 @@ type Client struct {
 	key     *rsa.PrivateKey
 	http    *http.Client
 
-	mu             sync.Mutex
+	// installationID optionally pins the installation for requests that are not
+	// scoped to a repository. Repo requests resolve the installation that owns
+	// the repo, so one App can serve several accounts without a pin.
 	installationID int64
-	cachedToken    string
-	tokenExpiry    time.Time
+
+	mu     sync.Mutex
+	tokens map[int64]installationToken
+	repos  map[string]installationRef
+}
+
+type installationToken struct {
+	value  string
+	expiry time.Time
+}
+
+type installationRef struct {
+	id      int64
+	expires time.Time
 }
 
 // New builds a client from either a personal token or App credentials.
@@ -62,6 +77,8 @@ func New(cfg config.GitHub) (*Client, error) {
 		appID:          cfg.AppID,
 		installationID: cfg.InstallationID,
 		http:           &http.Client{Timeout: 60 * time.Second},
+		tokens:         map[int64]installationToken{},
+		repos:          map[string]installationRef{},
 	}
 	if cfg.AppID != 0 && cfg.PrivateKeyPEM != "" {
 		key, err := ParsePrivateKey(cfg.PrivateKeyPEM)
@@ -101,36 +118,87 @@ func (c *Client) authToken(ctx context.Context) (string, error) {
 		return c.token, nil
 	}
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.cachedToken != "" && time.Now().Before(c.tokenExpiry) {
-		return c.cachedToken, nil
+	id := c.installationID
+	if id == 0 {
+		installs, err := c.installations(ctx)
+		if err != nil {
+			return "", err
+		}
+		if len(installs) == 0 {
+			return "", errors.New("github: app has no installations")
+		}
+		id = installs[0]
 	}
+	return c.installationToken(ctx, id)
+}
+
+// authTokenForRepo returns a token for the installation that owns repo. This
+// is what lets a single App review repositories under different accounts.
+func (c *Client) authTokenForRepo(ctx context.Context, repo string) (string, error) {
+	if c.key == nil {
+		return c.token, nil
+	}
+	id, err := c.installationForRepo(ctx, repo)
+	if err != nil {
+		return "", err
+	}
+	return c.installationToken(ctx, id)
+}
+
+const installationCacheTTL = 10 * time.Minute
+
+func (c *Client) installationForRepo(ctx context.Context, repo string) (int64, error) {
+	key := strings.ToLower(repo)
+	c.mu.Lock()
+	if ref, ok := c.repos[key]; ok && time.Now().Before(ref.expires) {
+		c.mu.Unlock()
+		return ref.id, nil
+	}
+	c.mu.Unlock()
+
+	jwt, err := c.jwt()
+	if err != nil {
+		return 0, err
+	}
+
+	var out struct {
+		ID int64 `json:"id"`
+	}
+	err = c.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/installation", repo), nil, &out, jwt)
+	if errors.Is(err, ErrNotFound) {
+		return 0, fmt.Errorf("github: app is not installed on %s", repo)
+	}
+	if err != nil {
+		return 0, fmt.Errorf("resolve installation for %s: %w", repo, err)
+	}
+	if out.ID == 0 {
+		return 0, fmt.Errorf("github: empty installation for %s", repo)
+	}
+
+	c.mu.Lock()
+	c.repos[key] = installationRef{id: out.ID, expires: time.Now().Add(installationCacheTTL)}
+	c.mu.Unlock()
+	return out.ID, nil
+}
+
+func (c *Client) installationToken(ctx context.Context, id int64) (string, error) {
+	c.mu.Lock()
+	if tok, ok := c.tokens[id]; ok && time.Now().Before(tok.expiry) {
+		c.mu.Unlock()
+		return tok.value, nil
+	}
+	c.mu.Unlock()
 
 	jwt, err := c.jwt()
 	if err != nil {
 		return "", err
 	}
 
-	if c.installationID == 0 {
-		var installs []struct {
-			ID int64 `json:"id"`
-		}
-		if err := c.do(ctx, http.MethodGet, "/app/installations", nil, &installs, jwt); err != nil {
-			return "", fmt.Errorf("list app installations: %w", err)
-		}
-		if len(installs) == 0 {
-			return "", errors.New("github: app has no installations")
-		}
-		c.installationID = installs[0].ID
-	}
-
 	var out struct {
 		Token     string    `json:"token"`
 		ExpiresAt time.Time `json:"expires_at"`
 	}
-	path := fmt.Sprintf("/app/installations/%d/access_tokens", c.installationID)
+	path := fmt.Sprintf("/app/installations/%d/access_tokens", id)
 	if err := c.do(ctx, http.MethodPost, path, nil, &out, jwt); err != nil {
 		return "", fmt.Errorf("create installation token: %w", err)
 	}
@@ -142,9 +210,37 @@ func (c *Client) authToken(ctx context.Context) (string, error) {
 	if expiry.IsZero() {
 		expiry = time.Now().Add(50 * time.Minute)
 	}
-	c.cachedToken = out.Token
-	c.tokenExpiry = expiry.Add(-2 * time.Minute)
-	return c.cachedToken, nil
+	c.mu.Lock()
+	c.tokens[id] = installationToken{value: out.Token, expiry: expiry.Add(-2 * time.Minute)}
+	c.mu.Unlock()
+	return out.Token, nil
+}
+
+// installations lists every account the App is installed on.
+func (c *Client) installations(ctx context.Context) ([]int64, error) {
+	jwt, err := c.jwt()
+	if err != nil {
+		return nil, err
+	}
+	var ids []int64
+	for page := 1; page <= 10; page++ {
+		var batch []struct {
+			ID int64 `json:"id"`
+		}
+		path := fmt.Sprintf("/app/installations?per_page=100&page=%d", page)
+		if err := c.do(ctx, http.MethodGet, path, nil, &batch, jwt); err != nil {
+			return nil, fmt.Errorf("list app installations: %w", err)
+		}
+		for _, inst := range batch {
+			if inst.ID != 0 {
+				ids = append(ids, inst.ID)
+			}
+		}
+		if len(batch) < 100 {
+			break
+		}
+	}
+	return ids, nil
 }
 
 func (c *Client) jwt() (string, error) {
@@ -169,11 +265,31 @@ func (c *Client) jwt() (string, error) {
 }
 
 func (c *Client) request(ctx context.Context, method, path string, body, out any) error {
-	token, err := c.authToken(ctx)
+	var (
+		token string
+		err   error
+	)
+	if repo := repoFromPath(path); repo != "" {
+		token, err = c.authTokenForRepo(ctx, repo)
+	} else {
+		token, err = c.authToken(ctx)
+	}
 	if err != nil {
 		return err
 	}
 	return c.do(ctx, method, path, body, out, token)
+}
+
+// repoFromPath extracts owner/repo from the REST paths this client builds.
+func repoFromPath(p string) string {
+	if !strings.HasPrefix(p, "/repos/") {
+		return ""
+	}
+	parts := strings.SplitN(strings.TrimPrefix(p, "/repos/"), "/", 3)
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+		return ""
+	}
+	return parts[0] + "/" + parts[1]
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body, out any, token string) error {
@@ -343,35 +459,36 @@ func (c *Client) GetPullRequest(ctx context.Context, repo string, number int) (*
 }
 
 // ListOpenPullRequests returns every open PR in a repo.
-// ListRepos returns every repository the bot can reach: the App installation's
-// repositories, or the token owner's repositories when running on a PAT. It is
+// ListRepos returns every repository the bot can reach across all of the App's
+// installations, or the token owner's repositories when running on a PAT. It is
 // best-effort discovery for the dashboard, not an authorization check.
 func (c *Client) ListRepos(ctx context.Context) ([]string, error) {
 	if c.key != nil {
-		var out []string
-		for page := 1; page <= 30; page++ {
-			var batch struct {
-				TotalCount   int `json:"total_count"`
-				Repositories []struct {
-					FullName string `json:"full_name"`
-					Archived bool   `json:"archived"`
-					Disabled bool   `json:"disabled"`
-				} `json:"repositories"`
+		installs, err := c.installations(ctx)
+		if err != nil {
+			return nil, err
+		}
+		seen := make(map[string]struct{})
+		out := make([]string, 0, 32)
+		for _, id := range installs {
+			token, err := c.installationToken(ctx, id)
+			if err != nil {
+				return nil, fmt.Errorf("installation %d: %w", id, err)
 			}
-			path := fmt.Sprintf("/installation/repositories?per_page=100&page=%d", page)
-			if err := c.request(ctx, http.MethodGet, path, nil, &batch); err != nil {
-				return nil, err
+			repos, err := c.listInstallationRepos(ctx, token)
+			if err != nil {
+				return nil, fmt.Errorf("installation %d: %w", id, err)
 			}
-			for _, r := range batch.Repositories {
-				if r.Disabled || r.Archived {
+			for _, repo := range repos {
+				key := strings.ToLower(repo)
+				if _, ok := seen[key]; ok {
 					continue
 				}
-				out = append(out, r.FullName)
-			}
-			if len(batch.Repositories) < 100 || len(out) >= batch.TotalCount {
-				break
+				seen[key] = struct{}{}
+				out = append(out, repo)
 			}
 		}
+		sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i]) < strings.ToLower(out[j]) })
 		return out, nil
 	}
 
@@ -393,6 +510,35 @@ func (c *Client) ListRepos(ctx context.Context) ([]string, error) {
 			out = append(out, r.FullName)
 		}
 		if len(batch) < 100 {
+			break
+		}
+	}
+	return out, nil
+}
+
+// listInstallationRepos pages through one installation's visible repositories.
+func (c *Client) listInstallationRepos(ctx context.Context, token string) ([]string, error) {
+	var out []string
+	for page := 1; page <= 30; page++ {
+		var batch struct {
+			TotalCount   int `json:"total_count"`
+			Repositories []struct {
+				FullName string `json:"full_name"`
+				Archived bool   `json:"archived"`
+				Disabled bool   `json:"disabled"`
+			} `json:"repositories"`
+		}
+		path := fmt.Sprintf("/installation/repositories?per_page=100&page=%d", page)
+		if err := c.do(ctx, http.MethodGet, path, nil, &batch, token); err != nil {
+			return nil, err
+		}
+		for _, r := range batch.Repositories {
+			if r.Disabled || r.Archived {
+				continue
+			}
+			out = append(out, r.FullName)
+		}
+		if len(batch.Repositories) < 100 || len(out) >= batch.TotalCount {
 			break
 		}
 	}

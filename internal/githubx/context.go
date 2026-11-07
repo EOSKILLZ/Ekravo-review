@@ -29,7 +29,7 @@ func (c *Client) RepoSizeKB(ctx context.Context, repo string) (int, error) {
 
 // DownloadTarball streams the repository archive for a commit.
 func (c *Client) DownloadTarball(ctx context.Context, repo, ref string, w io.Writer) error {
-	token, err := c.authToken(ctx)
+	token, err := c.authTokenForRepo(ctx, repo)
 	if err != nil {
 		return err
 	}
@@ -100,10 +100,10 @@ func (c *Client) FileAt(ctx context.Context, repo, filePath, ref string) ([]byte
 	return base64.StdEncoding.DecodeString(strings.ReplaceAll(out.Content, "\n", ""))
 }
 
-// GitAuthHeader builds the git http.extraheader value for the current token.
+// GitAuthHeader builds the git http.extraheader value for a repository token.
 // It never puts the token in a URL or a process argument.
-func (c *Client) GitAuthHeader(ctx context.Context) (string, error) {
-	token, err := c.authToken(ctx)
+func (c *Client) GitAuthHeader(ctx context.Context, repo string) (string, error) {
+	token, err := c.authTokenForRepo(ctx, repo)
 	if err != nil {
 		return "", err
 	}

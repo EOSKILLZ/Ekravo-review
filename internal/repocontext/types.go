@@ -72,7 +72,7 @@ type Source interface {
 	Tree(ctx context.Context, repo, ref string) ([]TreeEntry, error)
 	FileAt(ctx context.Context, repo, path, ref string) ([]byte, error)
 	// GitAuth returns the value for the git http.extraheader config, or "".
-	GitAuth(ctx context.Context) (string, error)
+	GitAuth(ctx context.Context, repo string) (string, error)
 }
 
 // Options bounds what the engine may fetch, parse, and send.
