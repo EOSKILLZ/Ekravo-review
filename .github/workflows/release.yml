@@ -45,10 +45,3 @@ jobs:
             COMMIT=${{ github.sha }}
             BUILD_DATE=${{ env.BUILD_DATE }}
 
-      - name: Make image public
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh api -X PATCH "orgs/ekravo/packages/container/ekravo-review" \
-            -f visibility=public
