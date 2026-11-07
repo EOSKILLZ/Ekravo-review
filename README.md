@@ -28,6 +28,11 @@ reach, reviewed or not. Only watched repositories get reviewed: leave *Watch all
 repositories* on, or switch it off and pick repositories one by one. The search
 box and the All / Watched / Paused / No reviews filters only narrow the view.
 
+The Reviews page keeps live work in **Now** (blocking findings) and **Next**
+(approved or advisory), and moves merged or closed pull requests to **Done**.
+Sort by newest or by repository; repository order is applied server-side and
+groups cards under each repo, so it holds across pages.
+
 ## Commands
 
 Comment on a pull request with your bot handle:

@@ -58,7 +58,7 @@ need one.
 ## Upgrades
 
     git fetch --tags
-    git checkout v0.1.0
+    git checkout v0.2.0
     VERSION=$(git describe --tags) COMMIT=$(git rev-parse --short HEAD) \
       BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ) docker compose up -d --build
 
@@ -73,6 +73,14 @@ not a horizontally scaled service.
 - `/api/health` — JSON with the build version.
 - `/metrics` — Prometheus counters. When `DASHBOARD_TOKEN` is set it requires
   `Authorization: Bearer <token>`, so configure the scraper accordingly.
+
+## Dashboard
+
+The Reviews view keeps live work in **Now** and **Next**, and lists merged or
+closed pull requests under **Done**. Newest-first and repository order are both
+server-side, so pagination keeps the order you selected. Pull request state is
+recorded from `pull_request` webhooks; after an upgrade, older reviews are
+reconciled against GitHub on startup.
 
 ## Failure behaviour
 
