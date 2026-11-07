@@ -1,4 +1,5 @@
-// Package llm talks to any OpenAI-compatible chat-completions endpoint.
+// Package llm talks to the Ekravo gateway (https://ekravo.com/v1) by default,
+// and to any OpenAI-compatible chat-completions endpoint by configuration.
 // It is built for free-model reality: a model chain, per-model circuit
 // breaking, and a JSON extraction ladder instead of trusting the first reply.
 package llm

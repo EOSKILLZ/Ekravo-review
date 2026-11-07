@@ -4,6 +4,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -16,6 +17,8 @@ const sessionCookie = "ekravo_dash"
 
 type runtimeInfo struct {
 	Mode                  string   `json:"mode"`
+	Provider              string   `json:"provider"`
+	ProviderURL           string   `json:"provider_url"`
 	Models                []string `json:"models"`
 	Handle                string   `json:"handle"`
 	RepoURL               string   `json:"repo_url"`
@@ -39,8 +42,11 @@ func (s *Server) runtimeInfo() runtimeInfo {
 	if s.cfg.WebhookMode() {
 		mode = "webhook"
 	}
+	provider, providerURL := providerFrom(s.cfg.LLM.BaseURL)
 	return runtimeInfo{
 		Mode:                  mode,
+		Provider:              provider,
+		ProviderURL:           providerURL,
 		Models:                append([]string(nil), s.cfg.LLM.Models...),
 		Handle:                s.cfg.Bot.Handle,
 		RepoURL:               s.cfg.Bot.RepoURL,
@@ -58,6 +64,20 @@ func (s *Server) runtimeInfo() runtimeInfo {
 		ContextMaxTotalChars:  s.cfg.Context.MaxTotalChars,
 		DashboardAuth:         s.cfg.Dashboard.Token != "",
 	}
+}
+
+// providerFrom labels the configured endpoint. Ekravo is the default and the
+// recommended provider; anything else is named by its host.
+func providerFrom(baseURL string) (name, link string) {
+	u, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil || u.Host == "" {
+		return "Custom endpoint", ""
+	}
+	host := strings.TrimPrefix(u.Host, "www.")
+	if host == "ekravo.com" || strings.HasSuffix(host, ".ekravo.com") {
+		return "Ekravo", "https://ekravo.com"
+	}
+	return host, u.Scheme + "://" + u.Host
 }
 
 func (s *Server) authorized(r *http.Request) bool {

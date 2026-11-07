@@ -206,7 +206,7 @@ func (c *Config) Validate() error {
 		problems = append(problems, "set GITHUB_REPO (owner/repo[,owner/repo2]) or WEBHOOK_SECRET for webhook mode")
 	}
 	if c.LLM.APIKey == "" {
-		problems = append(problems, "set LLM_API_KEY")
+		problems = append(problems, "set LLM_API_KEY (create one at https://ekravo.com)")
 	}
 	if len(c.LLM.Models) == 0 {
 		problems = append(problems, "set LLM_MODELS")

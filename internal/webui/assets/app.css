@@ -655,6 +655,9 @@ body::after {
 .setting-label { font-size: 12.5px; }
 .setting-hint { font-size: 10.5px; color: var(--muted-2); }
 .setting-value { font-family: var(--mono); font-size: 11px; color: var(--muted); text-align: right; overflow-wrap: anywhere; }
+.setting-link { display: inline-flex; align-items: center; gap: 5px; color: var(--ink); text-decoration: none; border-bottom: 1px solid color-mix(in oklab, var(--ink) 25%, transparent); padding-bottom: 1px; transition: color .2s ease, border-color .2s ease; }
+.setting-link:hover, .setting-link:focus-visible { color: var(--accent); border-color: var(--accent); }
+.setting-link svg { width: 11px; height: 11px; flex: none; }
 
 .switch {
   position: relative; width: 40px; height: 23px; flex: none;

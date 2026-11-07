@@ -602,6 +602,7 @@ function renderSettings() {
   if (!rt) return;
 
   const rows = [
+    ['AI', rt.provider || 'Ekravo', rt.provider_url || ''],
     ['Mode', rt.mode === 'webhook' ? 'Webhook deliveries' : 'Polling'],
     ['Models', (rt.models || []).join(' → ') || '—'],
     ['Handle', `@${rt.handle}`],
@@ -611,10 +612,12 @@ function renderSettings() {
     rows.push(['Repository context', `${rt.context_mode} · ${rt.context_fetch || 'auto'}`]);
   }
 
-  $('#runtime-rows').innerHTML = rows.map(([label, value]) => `
+  $('#runtime-rows').innerHTML = rows.map(([label, value, href]) => `
     <div class="setting-row">
       <span class="setting-label">${esc(label)}</span>
-      <span class="setting-value">${esc(value)}</span>
+      ${href
+        ? `<a class="setting-value setting-link" href="${esc(safeUrl(href))}" target="_blank" rel="noreferrer noopener">${esc(value)}<svg><use href="#i-external"/></svg></a>`
+        : `<span class="setting-value">${esc(value)}</span>`}
     </div>`).join('');
 
   const switches = [
