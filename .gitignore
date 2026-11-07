@@ -1,0 +1,27 @@
+# secrets
+.env
+.env.local
+*.pem
+
+# runtime state
+.ekravo-context/
+*.db
+*.db-shm
+*.db-wal
+data/
+ekravo-review.log
+.processed_prs.json
+
+# build output (anchored so cmd/ekravo-review is not ignored)
+bin/
+dist/
+/ekravo-review
+/ekravo-review.exe
+
+# go
+vendor/
+
+# editor / OS
+.DS_Store
+.idea/
+.vscode/

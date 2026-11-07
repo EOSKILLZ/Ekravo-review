@@ -1,0 +1,12 @@
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+*.pem
+bin/
+data/
+*.db
+*.db-shm
+*.db-wal
+*.log

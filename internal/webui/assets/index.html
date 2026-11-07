@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ekravo Review — Dashboard</title>
+<meta name="color-scheme" content="dark">
+<meta name="description" content="Review activity, verdicts, and findings for your Ekravo Review installation.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230a0a0c'/%3E%3Cpath d='M8 16c2.8-3.8 5.4-5.6 8-5.6s5.2 1.8 8 5.6c-2.8 3.8-5.4 5.6-8 5.6S10.8 19.8 8 16Z' fill='none' stroke='%23d9ff57' stroke-width='1.6'/%3E%3Ccircle cx='16' cy='16' r='2.6' fill='%23d9ff57'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body data-view="overview">
+
+<div class="grain" aria-hidden="true"></div>
+<div class="aura aura-a" aria-hidden="true"></div>
+<div class="aura aura-b" aria-hidden="true"></div>
+
+<svg class="sprite" aria-hidden="true" focusable="false">
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.6"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></symbol>
+  <symbol id="i-repo" viewBox="0 0 24 24"><path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5Z"/><path d="M5 19.5A1.5 1.5 0 0 0 6.5 21H19"/><path d="M9 7.5h6"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2.2"/><circle cx="8" cy="17" r="2.2"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 6.3"/><path d="M20 5v6h-6"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4 3.5 19.5h17Z"/><path d="M12 9.5v4"/><circle cx="12" cy="16.6" r=".9" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 5.5A1.5 1.5 0 0 0 13.5 4H5.5A1.5 1.5 0 0 0 4 5.5v8A1.5 1.5 0 0 0 5.5 15"/></symbol>
+  <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M20 4 11 13"/><path d="M18 14v4.5A1.5 1.5 0 0 1 16.5 20h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4.5" y="10" width="15" height="10" rx="2.4"/><path d="M8 10V7.5a4 4 0 0 1 8 0V10"/></symbol>
+  <symbol id="i-branch" viewBox="0 0 24 24"><circle cx="6" cy="5" r="2.2"/><circle cx="18" cy="6" r="2.2"/><circle cx="6" cy="19" r="2.2"/><path d="M6 7.2v9.6M8.2 19h4.3a5.5 5.5 0 0 0 5.5-5.5V8.2"/></symbol>
+  <symbol id="i-zap" viewBox="0 0 24 24"><path d="M13 2 4.5 13.5H11l-1 8.5L19.5 10H13Z"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H19v15.5H6.5A2.5 2.5 0 0 0 4 21Z"/><path d="M8 7.5h7M8 11h5"/></symbol>
+</svg>
+
+<div id="app" class="app" aria-busy="true">
+  <aside class="rail">
+    <a class="brand" href="#/overview" aria-label="Ekravo Review home">
+      <span class="brand-mark">
+        <svg viewBox="0 0 32 32" aria-hidden="true">
+          <rect x="1" y="1" width="30" height="30" rx="9.5"/>
+          <path d="M8.5 16c2.8-4 5.4-5.9 7.5-5.9s4.7 1.9 7.5 5.9c-2.8 4-5.4 5.9-7.5 5.9S11.3 20 8.5 16Z"/>
+          <circle cx="16" cy="16" r="2.5"/>
+        </svg>
+      </span>
+      <span class="brand-text">Ekravo<span class="brand-sub">Review</span></span>
+    </a>
+
+    <nav class="nav" aria-label="Dashboard">
+      <button class="nav-item is-active" data-view="overview"><svg><use href="#i-grid"/></svg><span>Overview</span></button>
+      <button class="nav-item" data-view="reviews"><svg><use href="#i-list"/></svg><span>Reviews</span></button>
+      <button class="nav-item" data-view="repos"><svg><use href="#i-repo"/></svg><span>Repositories</span></button>
+      <button class="nav-item" data-view="learnings"><svg><use href="#i-book"/></svg><span>Learnings</span></button>
+      <button class="nav-item" data-view="settings"><svg><use href="#i-sliders"/></svg><span>Runtime</span></button>
+    </nav>
+
+    <div class="rail-foot">
+      <div class="rail-status">
+        <span class="status-dot" id="rail-dot"></span>
+        <div class="status-copy">
+          <span class="status-mode" id="rail-mode">Connecting</span>
+          <span class="status-model" id="rail-model">—</span>
+        </div>
+      </div>
+      <div class="rail-meta" id="rail-meta">v2</div>
+    </div>
+  </aside>
+
+  <main class="stage">
+    <header class="topbar">
+      <div class="crumb">
+        <span class="kicker">Workspace</span>
+        <h1 id="page-title">Overview</h1>
+      </div>
+
+      <div class="top-actions">
+        <div class="menu" id="range">
+          <button class="menu-trigger" id="range-trigger" aria-haspopup="listbox" aria-expanded="false">
+            <span id="range-label">14 days</span>
+            <svg class="chev"><use href="#i-chevron"/></svg>
+          </button>
+          <div class="menu-pop" id="range-pop" role="listbox" aria-label="Time range">
+            <button role="option" data-days="7" aria-selected="false">7 days</button>
+            <button role="option" data-days="14" aria-selected="true">14 days</button>
+            <button role="option" data-days="30" aria-selected="false">30 days</button>
+            <button role="option" data-days="90" aria-selected="false">90 days</button>
+          </div>
+        </div>
+
+        <button class="icon-btn" id="refresh" aria-label="Refresh" title="Refresh">
+          <svg><use href="#i-refresh"/></svg>
+        </button>
+
+        <span class="live" id="live"><span class="live-dot"></span><span>Live</span></span>
+      </div>
+    </header>
+
+    <section class="view" id="view-overview" aria-labelledby="page-title">
+      <div class="hero-grid">
+        <article class="card pulse">
+          <div class="card-head">
+            <span class="eyebrow">Reviews</span>
+            <span class="chip" id="pulse-window">Last 14 days</span>
+          </div>
+          <div class="pulse-num" id="stat-reviews">0</div>
+          <p class="pulse-sub" id="stat-reviews-sub">Reading review history…</p>
+          <div class="pulse-spark" id="spark" aria-hidden="true"></div>
+        </article>
+
+        <article class="card stat">
+          <span class="eyebrow">Approval rate</span>
+          <div class="stat-num" id="stat-approve">—</div>
+          <p class="stat-sub" id="stat-approve-sub">of all reviews</p>
+        </article>
+
+        <article class="card stat">
+          <span class="eyebrow">Findings</span>
+          <div class="stat-num" id="stat-findings">—</div>
+          <p class="stat-sub" id="stat-findings-sub">validated and anchored</p>
+        </article>
+
+        <article class="card stat">
+          <span class="eyebrow">Auto-merged</span>
+          <div class="stat-num" id="stat-merged">—</div>
+          <p class="stat-sub" id="stat-merged-sub">across all repositories</p>
+        </article>
+      </div>
+
+      <div class="split">
+        <article class="card chart-card">
+          <div class="card-head">
+            <div>
+              <h2 class="card-title">Review pulse</h2>
+              <p class="card-note">Reviews per day, with findings layered beneath.</p>
+            </div>
+            <div class="legend">
+              <span class="legend-item"><span class="swatch swatch-line"></span>Reviews</span>
+              <span class="legend-item"><span class="swatch swatch-fill"></span>Findings</span>
+            </div>
+          </div>
+          <div class="chart" id="chart"></div>
+        </article>
+
+        <article class="card recent-card">
+          <div class="card-head">
+            <h2 class="card-title">Latest</h2>
+            <button class="link-btn" id="see-all">See all<svg><use href="#i-chevron"/></svg></button>
+          </div>
+          <div class="feed" id="recent"></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="view" id="view-reviews" hidden>
+      <div class="toolbar">
+        <div class="seg" id="verdict-filter" role="tablist" aria-label="Filter by verdict">
+          <span class="seg-pill" aria-hidden="true"></span>
+          <button class="seg-btn is-active" role="tab" aria-selected="true" data-verdict="all">All</button>
+          <button class="seg-btn" role="tab" aria-selected="false" data-verdict="approve">Approved</button>
+          <button class="seg-btn" role="tab" aria-selected="false" data-verdict="suggestions">Suggestions</button>
+          <button class="seg-btn" role="tab" aria-selected="false" data-verdict="changes">Changes</button>
+        </div>
+
+        <div class="search">
+          <svg class="search-icon"><use href="#i-search"/></svg>
+          <input id="search" type="text" placeholder="Search repo, PR or title" aria-label="Search reviews" autocomplete="off" spellcheck="false">
+          <button class="search-clear" id="search-clear" aria-label="Clear search" hidden><svg><use href="#i-x"/></svg></button>
+        </div>
+      </div>
+
+      <div class="list-meta">
+        <span id="review-count">—</span>
+        <span class="list-hint">Click a review to inspect its findings</span>
+      </div>
+
+      <div class="rows" id="review-list" aria-live="polite"></div>
+
+      <div class="pager">
+        <button class="ghost" id="load-more" hidden>Load more</button>
+      </div>
+    </section>
+
+    <section class="view" id="view-repos" hidden>
+      <div class="repo-grid" id="repo-grid" aria-live="polite"></div>
+    </section>
+
+    <section class="view" id="view-learnings" hidden>
+      <div class="toolbar">
+        <label class="repo-pick">
+          <span class="kicker">Repository</span>
+          <select id="learn-repo" aria-label="Repository"></select>
+        </label>
+        <span class="list-hint" id="learn-count"></span>
+      </div>
+
+      <div class="learn-grid">
+        <article class="card">
+          <div class="card-head">
+            <div>
+              <h2 class="card-title">Teach the reviewer</h2>
+              <p class="card-note">Repo-scoped rules are injected into every review that touches the glob.</p>
+            </div>
+          </div>
+          <form class="learn-form" id="learn-form">
+            <label class="field">
+              <span>Instruction</span>
+              <textarea id="learn-text" rows="3" maxlength="500" required
+                placeholder="Use the repository logger, never fmt.Println."></textarea>
+            </label>
+            <label class="field">
+              <span>Path glob <em>optional</em></span>
+              <input id="learn-glob" type="text" maxlength="200" placeholder="internal/**/*.go" spellcheck="false" autocomplete="off">
+            </label>
+            <div class="learn-form-actions">
+              <button class="primary" type="submit" id="learn-submit">Add learning</button>
+              <button class="ghost" type="button" id="learn-cancel" hidden>Cancel</button>
+            </div>
+          </form>
+        </article>
+
+        <article class="card">
+          <div class="card-head">
+            <div>
+              <h2 class="card-title">Active learnings</h2>
+              <p class="card-note">Disable a rule to keep it without injecting it.</p>
+            </div>
+            <button class="icon-btn" id="learn-refresh" aria-label="Reload learnings" title="Reload learnings">
+              <svg><use href="#i-refresh"/></svg>
+            </button>
+          </div>
+          <div class="learn-list" id="learn-list" aria-live="polite"></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="view" id="view-settings" hidden>
+      <div class="settings-grid">
+        <article class="card">
+          <div class="card-head"><h2 class="card-title">Runtime</h2><span class="chip" id="runtime-mode">—</span></div>
+          <div class="setting-rows" id="runtime-rows"></div>
+        </article>
+
+        <article class="card">
+          <div class="card-head"><h2 class="card-title">Behaviour</h2></div>
+          <p class="card-note">Environment-driven and read-only here. Toggle in <code>.env</code>, then restart.</p>
+          <div class="setting-rows" id="switch-rows"></div>
+        </article>
+
+        <article class="card span-2">
+          <div class="card-head">
+            <div>
+              <h2 class="card-title">Configuration snippet</h2>
+              <p class="card-note">The switches that matter most, ready to paste.</p>
+            </div>
+            <button class="ghost" id="copy-env"><svg><use href="#i-copy"/></svg>Copy</button>
+          </div>
+          <pre class="snippet" id="env-snippet">—</pre>
+        </article>
+
+        <article class="card span-2 notice" id="security-notice" hidden>
+          <svg class="notice-icon"><use href="#i-lock"/></svg>
+          <div>
+            <strong>This dashboard has no password.</strong>
+            <p>Set <code>DASHBOARD_TOKEN</code> and restart before exposing it beyond localhost.</p>
+          </div>
+        </article>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="scrim" id="scrim" hidden></div>
+<aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" aria-hidden="true">
+  <header class="drawer-head">
+    <div class="drawer-title-wrap">
+      <span class="kicker" id="drawer-kicker">Review</span>
+      <h2 id="drawer-title">Loading…</h2>
+    </div>
+    <button class="icon-btn" id="drawer-close" aria-label="Close review"><svg><use href="#i-x"/></svg></button>
+  </header>
+  <div class="drawer-body" id="drawer-body"></div>
+</aside>
+
+<div class="gate" id="gate" hidden>
+  <form class="gate-card" id="gate-form">
+    <span class="gate-mark">
+      <svg viewBox="0 0 32 32" aria-hidden="true">
+        <rect x="1" y="1" width="30" height="30" rx="9.5"/>
+        <path d="M8.5 16c2.8-4 5.4-5.9 7.5-5.9s4.7 1.9 7.5 5.9c-2.8 4-5.4 5.9-7.5 5.9S11.3 20 8.5 16Z"/>
+        <circle cx="16" cy="16" r="2.5"/>
+      </svg>
+    </span>
+    <h2>Unlock the dashboard</h2>
+    <p>Paste the <code>DASHBOARD_TOKEN</code> configured for this instance.</p>
+    <label class="field">
+      <span>Token</span>
+      <input id="gate-token" type="password" autocomplete="current-password" placeholder="••••••••••••" required>
+    </label>
+    <p class="gate-error" id="gate-error" role="alert" hidden></p>
+    <button class="primary" type="submit" id="gate-submit">Enter</button>
+    <span class="gate-note">Stored as an HttpOnly cookie for 7 days.</span>
+  </form>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<noscript><div class="noscript">Ekravo Review needs JavaScript for the dashboard. The JSON API is available under <code>/api</code>.</div></noscript>
+
+<script src="/app.js"></script>
+</body>
+</html>

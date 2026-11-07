@@ -1,0 +1,20 @@
+services:
+  ekravo-review:
+    build:
+      context: .
+      args:
+        VERSION: ${VERSION:-dev}
+    image: ekravo-review:latest
+    container_name: ekravo-review
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DB_PATH: /data/ekravo-review.db
+      CONTEXT_CACHE_DIR: /data/.ekravo-context
+    ports:
+      - "${WEBHOOK_PORT:-8090}:8090"
+    volumes:
+      - ./data:/data
+      # GitHub App private key (optional):
+      # - ./your-app.pem:/data/your-app.pem:ro

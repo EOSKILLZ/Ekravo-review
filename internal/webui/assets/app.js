@@ -1,0 +1,1046 @@
+'use strict';
+
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+
+const state = {
+  view: 'overview',
+  days: 14,
+  verdict: 'all',
+  q: '',
+  offset: 0,
+  total: 0,
+  reviews: [],
+  series: [],
+  runtime: null,
+  loading: false,
+  reviewsLoaded: false,
+  reposLoaded: false,
+  lastFocus: null,
+};
+
+const TITLES = {
+  overview: 'Overview',
+  reviews: 'Reviews',
+  repos: 'Repositories',
+  learnings: 'Learnings',
+  settings: 'Runtime',
+};
+
+/* ── utilities ─────────────────────────────────────────────────────────── */
+
+const esc = (value = '') =>
+  String(value).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+
+const num = (n) => new Intl.NumberFormat().format(Number(n) || 0);
+
+const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function relativeTime(iso) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '—';
+  const seconds = (Date.now() - date.getTime()) / 1000;
+  if (seconds < 60) return 'just now';
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+  if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`;
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function shortDate(iso) {
+  const date = new Date(`${iso}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' });
+}
+
+function duration(ms) {
+  if (!ms) return '';
+  return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)}s`;
+}
+
+function safeUrl(raw) {
+  try {
+    const url = new URL(raw);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : '#';
+  } catch {
+    return '#';
+  }
+}
+
+const verdictLabel = (v) => ({
+  approve: 'Approved',
+  changes: 'Changes',
+  suggestions: 'Suggestions',
+  skipped: 'Skipped',
+  legacy: 'Imported',
+}[v] || (v ? v[0].toUpperCase() + v.slice(1) : 'Unknown'));
+
+const verdictClass = (v) => ({
+  approve: 'v-approve',
+  changes: 'v-changes',
+  suggestions: 'v-suggestions',
+}[v] || 'v-neutral');
+
+const emptyState = (title, copy) => `
+  <div class="empty">
+    <span class="empty-mark">${esc(title)}</span>
+    <p>${esc(copy)}</p>
+  </div>`;
+
+const skeletonRows = (n) => Array.from({ length: n }, () => '<div class="skeleton-row"></div>').join('');
+
+async function api(path, options = {}) {
+  const init = {
+    method: options.method || 'GET',
+    credentials: 'same-origin',
+    headers: { Accept: 'application/json' },
+  };
+  if (options.body !== undefined) {
+    init.headers['Content-Type'] = 'application/json';
+    init.body = JSON.stringify(options.body);
+  }
+  const res = await fetch(path, init);
+  if (res.status === 401) {
+    openGate();
+    throw new Error('Unauthorized');
+  }
+  if (!res.ok) {
+    let message = 'Request failed';
+    try {
+      const body = await res.json();
+      message = body.error || message;
+    } catch { /* keep default */ }
+    throw new Error(message);
+  }
+  return res.json();
+}
+
+let toastTimer;
+function toast(message) {
+  const el = $('#toast');
+  el.textContent = message;
+  el.classList.add('is-visible');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('is-visible'), 2600);
+}
+
+/* ── numbers ───────────────────────────────────────────────────────────── */
+
+function animateNumber(el, target, suffix = '') {
+  const to = Number(target) || 0;
+  if (reducedMotion()) {
+    el.textContent = num(to) + suffix;
+    return;
+  }
+  const from = Number(el.dataset.value || 0);
+  const start = performance.now();
+  const span = 850;
+  el.dataset.value = String(to);
+
+  const tick = (now) => {
+    const progress = Math.min(1, (now - start) / span);
+    const eased = 1 - Math.pow(1 - progress, 4);
+    el.textContent = num(Math.round(from + (to - from) * eased)) + suffix;
+    if (progress < 1) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
+/* ── overview ──────────────────────────────────────────────────────────── */
+
+async function loadOverview(silent = false) {
+  const data = await api(`/api/overview?days=${state.days}`);
+  state.runtime = data.runtime;
+  state.series = Array.isArray(data.series) ? data.series : [];
+  renderRuntime();
+  renderOverview(data, silent);
+  $('#app').setAttribute('aria-busy', 'false');
+}
+
+function renderRuntime() {
+  const rt = state.runtime;
+  if (!rt) return;
+  $('#rail-mode').textContent = rt.mode === 'webhook' ? 'Webhook mode' : 'Polling mode';
+  $('#rail-model').textContent = (rt.models && rt.models[0]) || 'no model';
+  $('#rail-meta').textContent = `${rt.workers} workers · ${rt.dashboard_auth ? 'secured' : 'open access'}`;
+  $('#rail-dot').classList.add('is-live');
+  $('#runtime-mode').textContent = rt.mode === 'webhook' ? 'Webhook' : 'Polling';
+  $('#security-notice').hidden = Boolean(rt.dashboard_auth);
+}
+
+function renderOverview(data, silent) {
+  const totals = data.totals || {};
+  const reviews = totals.reviews || 0;
+
+  if (silent) {
+    $('#stat-reviews').textContent = num(reviews);
+    $('#stat-approve').textContent = reviews ? `${Math.round((totals.approve || 0) / reviews * 100)}%` : '0%';
+    $('#stat-findings').textContent = num(totals.findings);
+    $('#stat-merged').textContent = num(totals.merged);
+  } else {
+    animateNumber($('#stat-reviews'), reviews);
+    const rate = reviews ? Math.round((totals.approve || 0) / reviews * 100) : 0;
+    animateNumber($('#stat-approve'), rate, '%');
+    animateNumber($('#stat-findings'), totals.findings);
+    animateNumber($('#stat-merged'), totals.merged);
+  }
+
+  $('#pulse-window').textContent = `Last ${state.days} days`;
+  $('#stat-reviews-sub').textContent = reviews
+    ? `${num(totals.approve)} approved · ${num(totals.changes)} changes requested`
+    : 'No reviews in this window yet';
+  $('#stat-approve-sub').textContent = `${num(totals.approve)} of ${num(reviews)} reviews`;
+  $('#stat-findings-sub').textContent = totals.files
+    ? `across ${num(totals.files)} changed files`
+    : 'validated and anchored';
+  $('#stat-merged-sub').textContent = `${num(totals.repos)} repositories tracked`;
+
+  renderSpark(state.series);
+  renderChart(state.series);
+  renderRecent(data.recent || []);
+}
+
+function renderSpark(series) {
+  const host = $('#spark');
+  if (!series.length) {
+    host.innerHTML = '';
+    return;
+  }
+  const width = 120;
+  const height = 60;
+  const max = Math.max(1, ...series.map((d) => d.reviews));
+  const step = width / Math.max(1, series.length - 1);
+  const points = series.map((d, i) => [i * step, height - (d.reviews / max) * (height - 8) - 4]);
+  const line = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(' ');
+  host.innerHTML = `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" aria-hidden="true">
+    <path d="${line}" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round"/>
+  </svg>`;
+}
+
+function smoothPath(points) {
+  if (!points.length) return '';
+  if (points.length === 1) return `M ${points[0][0]} ${points[0][1]}`;
+  let d = `M ${points[0][0].toFixed(1)} ${points[0][1].toFixed(1)}`;
+  for (let i = 0; i < points.length - 1; i += 1) {
+    const p0 = points[i - 1] || points[i];
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const p3 = points[i + 2] || p2;
+    const c1x = p1[0] + (p2[0] - p0[0]) / 6;
+    const c1y = p1[1] + (p2[1] - p0[1]) / 6;
+    const c2x = p2[0] - (p3[0] - p1[0]) / 6;
+    const c2y = p2[1] - (p3[1] - p1[1]) / 6;
+    d += ` C ${c1x.toFixed(1)} ${c1y.toFixed(1)}, ${c2x.toFixed(1)} ${c2y.toFixed(1)}, ${p2[0].toFixed(1)} ${p2[1].toFixed(1)}`;
+  }
+  return d;
+}
+
+function renderChart(series) {
+  const host = $('#chart');
+  if (!series.length) {
+    host.innerHTML = emptyState('No activity', 'Reviews will appear here as soon as the bot runs.');
+    return;
+  }
+
+  const W = 760;
+  const H = 220;
+  const L = 34;
+  const R = 12;
+  const T = 16;
+  const B = 30;
+  const plotW = W - L - R;
+  const plotH = H - T - B;
+  const maxReviews = Math.max(1, ...series.map((d) => d.reviews));
+  const maxFindings = Math.max(1, ...series.map((d) => d.findings));
+  const step = plotW / Math.max(1, series.length - 1);
+
+  const points = series.map((d, i) => [L + i * step, T + plotH * (1 - d.reviews / maxReviews)]);
+  const line = smoothPath(points);
+  const area = `${line} L ${points[points.length - 1][0].toFixed(1)} ${T + plotH} L ${points[0][0].toFixed(1)} ${T + plotH} Z`;
+
+  const grid = [0, 0.5, 1].map((ratio) => {
+    const y = T + plotH * ratio;
+    return `<line class="chart-grid" x1="${L}" y1="${y}" x2="${W - R}" y2="${y}"/>
+      <text class="chart-label" x="0" y="${y + 3}">${num(Math.round(maxReviews * (1 - ratio)))}</text>`;
+  }).join('');
+
+  const bars = series.map((d, i) => {
+    const height = Math.max(0, (d.findings / maxFindings) * 24);
+    if (height < 1) return '';
+    const x = L + i * step - Math.max(1.5, step * 0.16);
+    return `<rect x="${x.toFixed(1)}" y="${(T + plotH - height).toFixed(1)}"
+      width="${Math.max(2, step * 0.32).toFixed(1)}" height="${height.toFixed(1)}"
+      rx="1.4" fill="rgba(255,176,103,.32)"/>`;
+  }).join('');
+
+  const labelIndexes = series.length > 2
+    ? [0, Math.floor((series.length - 1) / 2), series.length - 1]
+    : series.map((_, i) => i);
+  const xLabels = labelIndexes.map((i) => {
+    const x = L + i * step;
+    const anchor = i === 0 ? 'start' : i === series.length - 1 ? 'end' : 'middle';
+    return `<text class="chart-label" x="${x}" y="${H - 8}" text-anchor="${anchor}">${shortDate(series[i].date)}</text>`;
+  }).join('');
+
+  const last = points[points.length - 1];
+  const totals = series.reduce((acc, d) => ({ reviews: acc.reviews + d.reviews, findings: acc.findings + d.findings }), { reviews: 0, findings: 0 });
+  const empty = totals.reviews === 0 ? '<div class="chart-empty">No reviews in this window</div>' : '';
+
+  host.innerHTML = `
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Reviews per day">
+      <defs>
+        <linearGradient id="areaFill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#d9ff57" stop-opacity=".16"/>
+          <stop offset="100%" stop-color="#d9ff57" stop-opacity="0"/>
+        </linearGradient>
+      </defs>
+      ${grid}
+      ${bars}
+      <path class="chart-area" d="${area}"/>
+      <path class="chart-line" d="${line}" pathLength="1"/>
+      <line class="chart-cursor" x1="${L}" y1="${T}" x2="${L}" y2="${T + plotH}"/>
+      <circle class="chart-dot" cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="3.4"/>
+      ${xLabels}
+    </svg>
+    <div class="chart-tip"></div>
+    ${empty}`;
+
+  const svg = host.querySelector('svg');
+  const cursor = host.querySelector('.chart-cursor');
+  const tip = host.querySelector('.chart-tip');
+
+  host.onmousemove = (event) => {
+    const rect = host.getBoundingClientRect();
+    if (!rect.width) return;
+    const x = ((event.clientX - rect.left) / rect.width) * W;
+    let index = Math.round((x - L) / step);
+    index = Math.max(0, Math.min(series.length - 1, index));
+    const day = series[index];
+    const px = (points[index][0] / W) * rect.width;
+    const clamped = Math.min(Math.max(px, 64), rect.width - 64);
+
+    cursor.setAttribute('x1', points[index][0]);
+    cursor.setAttribute('x2', points[index][0]);
+    tip.style.left = `${clamped}px`;
+    tip.innerHTML = `<strong>${num(day.reviews)}</strong> reviews · ${num(day.findings)} findings<br>${shortDate(day.date)}`;
+    host.classList.add('is-hovering');
+  };
+  host.onmouseleave = () => host.classList.remove('is-hovering');
+  if (svg) svg.setAttribute('aria-hidden', 'true');
+}
+
+function renderRecent(recent) {
+  const host = $('#recent');
+  if (!recent.length) {
+    host.innerHTML = emptyState('Nothing yet', 'Your first review will show up here.');
+    return;
+  }
+  host.innerHTML = recent.map((r) => `
+    <button class="feed-item" data-id="${r.id}">
+      <span class="feed-dot ${verdictClass(r.verdict)}"></span>
+      <span class="feed-main">
+        <span class="feed-repo">${esc(r.repo)} · #${r.pr}</span>
+        <span class="feed-title">${esc(r.title || 'Untitled pull request')}</span>
+      </span>
+      <span class="feed-time">${relativeTime(r.created_at)}</span>
+    </button>`).join('');
+
+  $$('.feed-item', host).forEach((el) => {
+    el.addEventListener('click', () => openReview(el.dataset.id));
+  });
+}
+
+/* ── reviews ───────────────────────────────────────────────────────────── */
+
+let reviewRequest = 0;
+
+async function loadReviews(reset) {
+  if (state.loading && !reset) return;
+  const request = ++reviewRequest;
+  state.loading = true;
+
+  if (reset) {
+    state.offset = 0;
+    $('#review-list').innerHTML = skeletonRows(6);
+    $('#load-more').hidden = true;
+    $('#review-count').textContent = 'Loading…';
+  }
+
+  const params = new URLSearchParams({
+    limit: '25',
+    offset: String(reset ? 0 : state.offset),
+  });
+  if (state.verdict !== 'all') params.set('verdict', state.verdict);
+  if (state.q) params.set('q', state.q);
+
+  try {
+    const data = await api(`/api/reviews?${params.toString()}`);
+    if (request !== reviewRequest) return;
+    const incoming = Array.isArray(data.reviews) ? data.reviews : [];
+    state.reviews = reset ? incoming : state.reviews.concat(incoming);
+    state.total = Number(data.total) || 0;
+    state.offset = state.reviews.length;
+    renderReviewList();
+  } catch (error) {
+    if (request === reviewRequest && error.message !== 'Unauthorized') {
+      $('#review-list').innerHTML = emptyState('Could not load reviews', error.message);
+      toast(error.message);
+    }
+  } finally {
+    if (request === reviewRequest) state.loading = false;
+  }
+}
+
+function renderReviewList() {
+  const host = $('#review-list');
+  $('#review-count').textContent = state.total
+    ? `${num(state.total)} review${state.total === 1 ? '' : 's'}`
+    : 'No reviews';
+  $('#load-more').hidden = state.reviews.length >= state.total;
+
+  if (!state.reviews.length) {
+    host.innerHTML = emptyState('Nothing here yet', state.q || state.verdict !== 'all'
+      ? 'No reviews match this filter.'
+      : 'Open a pull request and the first review will land here.');
+    return;
+  }
+
+  host.innerHTML = state.reviews.map((r) => `
+    <button class="row" data-id="${r.id}">
+      <span class="row-main">
+        <span class="row-repo">${esc(r.repo)}</span>
+        <span class="row-title">${esc(r.title || `Pull request #${r.pr}`)}</span>
+      </span>
+      <span class="row-pr">#${r.pr}</span>
+      <span class="verdict ${verdictClass(r.verdict)}">${esc(verdictLabel(r.verdict))}</span>
+      <span class="row-meta">${num(r.findings)} findings${r.duration_ms ? ` · ${duration(r.duration_ms)}` : ''}</span>
+      <span class="row-time">${relativeTime(r.created_at)}</span>
+      <svg><use href="#i-chevron"/></svg>
+    </button>`).join('');
+
+  $$('.row', host).forEach((el) => {
+    el.addEventListener('click', () => openReview(el.dataset.id));
+  });
+  movePill();
+}
+
+function movePill() {
+  const seg = $('#verdict-filter');
+  const active = seg.querySelector('.seg-btn.is-active');
+  const pill = seg.querySelector('.seg-pill');
+  if (!active || !pill) return;
+  pill.style.width = `${active.offsetWidth}px`;
+  pill.style.transform = `translateX(${active.offsetLeft}px)`;
+}
+
+/* ── repositories ──────────────────────────────────────────────────────── */
+
+async function loadRepos() {
+  const host = $('#repo-grid');
+  host.innerHTML = '<div class="skeleton-block"></div><div class="skeleton-block"></div><div class="skeleton-block"></div>';
+  try {
+    const data = await api('/api/repos');
+    const repos = Array.isArray(data.repos) ? data.repos : [];
+    if (!repos.length) {
+      host.innerHTML = emptyState('No repositories', 'Once the bot reviews a pull request, its repository appears here.');
+      return;
+    }
+    host.innerHTML = repos.map((repo) => {
+      const filled = Math.min(10, Math.max(1, Math.round(repo.findings / Math.max(1, repo.reviews) * 2)));
+      const bars = Array.from({ length: 14 }, (_, i) => {
+        if (i < filled) return '<span class="on"></span>';
+        if (i < filled + 2) return '<span class="warm"></span>';
+        return '<span></span>';
+      }).join('');
+
+      return `<article class="repo-card">
+        <div class="repo-top">
+          <span class="repo-name">${esc(repo.repo)}</span>
+          <span class="verdict ${verdictClass(repo.last_verdict)}">${esc(verdictLabel(repo.last_verdict))}</span>
+        </div>
+        <div class="repo-nums">
+          <div><strong>${num(repo.reviews)}</strong><span>Reviews</span></div>
+          <div><strong>${num(repo.findings)}</strong><span>Findings</span></div>
+        </div>
+        <div class="bars" aria-hidden="true">${bars}</div>
+        <span class="repo-time">Last review ${relativeTime(repo.last_review_at)}</span>
+      </article>`;
+    }).join('');
+  } catch (error) {
+    if (error.message !== 'Unauthorized') {
+      host.innerHTML = emptyState('Could not load repositories', error.message);
+      toast(error.message);
+    }
+  }
+}
+
+/* ── settings ──────────────────────────────────────────────────────────── */
+
+async function loadRuntime() {
+  if (!state.runtime) {
+    try {
+      state.runtime = await api('/api/runtime');
+      renderRuntime();
+    } catch (error) {
+      if (error.message !== 'Unauthorized') toast(error.message);
+      return;
+    }
+  }
+  renderSettings();
+}
+
+function renderSettings() {
+  const rt = state.runtime;
+  if (!rt) return;
+
+  const rows = [
+    ['Mode', rt.mode === 'webhook' ? 'Webhook deliveries' : 'Polling'],
+    ['Model chain', (rt.models || []).join(' → ') || '—'],
+    ['Bot handle', `@${rt.handle}`],
+    ['Workers', String(rt.workers)],
+    ['Files per review', String(rt.max_files)],
+    ['Chunk budget', `${num(rt.chunk_chars)} chars`],
+    ['Repository context', `${rt.context_mode || 'off'} · ${rt.context_fetch || 'auto'}`],
+    ['Context budget', `${num(rt.context_max_chars)} / ${num(rt.context_max_total_chars)} chars`],
+  ];
+
+  $('#runtime-rows').innerHTML = rows.map(([label, value]) => `
+    <div class="setting-row">
+      <span class="setting-label">${esc(label)}</span>
+      <span class="setting-value">${esc(value)}</span>
+    </div>`).join('');
+
+  const switches = [
+    ['Auto-approve', 'Submit APPROVE / REQUEST_CHANGES reviews', rt.auto_approve, 'AUTO_APPROVE'],
+    ['Auto-merge', 'Merge a clean approval without a human', rt.auto_merge, 'AUTO_MERGE'],
+    ['Web evidence', 'Check external claims against sources', rt.web_research, 'WEB_RESEARCH'],
+  ];
+
+  $('#switch-rows').innerHTML = switches.map(([label, hint, on, env]) => `
+    <div class="setting-row">
+      <span class="setting-text">
+        <span class="setting-label">${esc(label)}</span>
+        <span class="setting-hint">${esc(hint)}</span>
+      </span>
+      <button class="switch ${on ? 'is-on' : ''}" role="switch" aria-checked="${on}" aria-label="${esc(label)}" data-env="${env}" data-value="${on}">
+        <span class="knob"></span>
+      </button>
+    </div>`).join('');
+
+  $$('#switch-rows .switch').forEach((el) => {
+    el.addEventListener('click', () => {
+      const env = el.dataset.env;
+      const next = el.dataset.value === 'true' ? 'false' : 'true';
+      toast(`Set ${env}=${next} in .env, then restart.`);
+    });
+  });
+
+  $('#env-snippet').textContent = [
+    '# .env — the switches that matter',
+    `AUTO_APPROVE=${rt.auto_approve}`,
+    `AUTO_MERGE=${rt.auto_merge}`,
+    `AUTO_MERGE_METHOD=${rt.auto_merge_method}`,
+    `WEB_RESEARCH=${rt.web_research}`,
+    `WEB_RESEARCH_MAX_QUERIES=${rt.web_research_max_queries}`,
+    `LLM_MODELS=${(rt.models || []).join(',')}`,
+    `CONTEXT_MODE=${rt.context_mode || 'off'}`,
+    `CONTEXT_FETCH=${rt.context_fetch || 'auto'}`,
+  ].join('\n');
+
+  $('#security-notice').hidden = Boolean(rt.dashboard_auth);
+}
+
+/* ── learnings ─────────────────────────────────────────────────────────── */
+
+const learnings = {
+  repo: '',
+  repos: [],
+  items: [],
+  editing: 0,
+};
+
+async function loadLearningsView() {
+  const select = $('#learn-repo');
+  if (!learnings.repos.length) {
+    try {
+      const data = await api('/api/repos');
+      learnings.repos = (Array.isArray(data.repos) ? data.repos : []).map((r) => r.repo).filter(Boolean);
+    } catch (error) {
+      if (error.message !== 'Unauthorized') toast(error.message);
+    }
+    select.innerHTML = learnings.repos.length
+      ? learnings.repos.map((repo) => `<option value="${esc(repo)}">${esc(repo)}</option>`).join('')
+      : '<option value="">No repositories yet</option>';
+  }
+  if (!learnings.repos.includes(learnings.repo)) learnings.repo = learnings.repos[0] || '';
+  select.value = learnings.repo;
+  select.disabled = learnings.repos.length === 0;
+  await loadLearnings();
+}
+
+async function loadLearnings() {
+  const host = $('#learn-list');
+  if (!learnings.repo) {
+    learnings.items = [];
+    host.innerHTML = emptyState('No repository', 'Learnings are scoped to a repository, and none has been reviewed yet.');
+    $('#learn-count').textContent = '';
+    return;
+  }
+  host.innerHTML = '<div class="skeleton-block"></div>';
+  try {
+    const data = await api(`/api/learnings?repo=${encodeURIComponent(learnings.repo)}`);
+    learnings.items = Array.isArray(data.learnings) ? data.learnings : [];
+    renderLearnings();
+  } catch (error) {
+    if (error.message !== 'Unauthorized') {
+      host.innerHTML = emptyState('Could not load learnings', error.message);
+      toast(error.message);
+    }
+  }
+}
+
+function renderLearnings() {
+  const host = $('#learn-list');
+  const items = learnings.items;
+  $('#learn-count').textContent = items.length
+    ? `${num(items.length)} rule${items.length === 1 ? '' : 's'} for ${learnings.repo}`
+    : '';
+
+  if (!items.length) {
+    host.innerHTML = emptyState('No learnings yet', 'Add a rule and every future review of this repository follows it.');
+    return;
+  }
+
+  host.innerHTML = items.map((item) => `
+    <article class="learn-item${item.enabled ? '' : ' is-off'}">
+      <div class="learn-main">
+        <p class="learn-text">${esc(item.text)}</p>
+        <div class="learn-meta">
+          <span class="learn-glob">${esc(item.path_glob || 'every file')}</span>
+          <span>${esc(item.source)}</span>
+          ${item.hits ? `<span>${num(item.hits)} hits</span>` : ''}
+          <span>${relativeTime(item.created_at)}</span>
+        </div>
+      </div>
+      <div class="learn-actions">
+        <button class="switch ${item.enabled ? 'is-on' : ''}" role="switch"
+          aria-checked="${item.enabled}" aria-label="Enable learning" data-toggle="${item.id}">
+          <span class="knob"></span>
+        </button>
+        <button class="ghost" data-edit="${item.id}">Edit</button>
+        <button class="ghost danger" data-delete="${item.id}">Delete</button>
+      </div>
+    </article>`).join('');
+
+  $$('[data-toggle]', host).forEach((el) => {
+    el.addEventListener('click', () => setLearningEnabled(Number(el.dataset.toggle), !el.classList.contains('is-on')));
+  });
+  $$('[data-edit]', host).forEach((el) => {
+    el.addEventListener('click', () => startEditLearning(Number(el.dataset.edit)));
+  });
+  $$('[data-delete]', host).forEach((el) => {
+    el.addEventListener('click', () => deleteLearning(Number(el.dataset.delete)));
+  });
+}
+
+async function submitLearning(event) {
+  event.preventDefault();
+  const text = $('#learn-text').value.trim();
+  if (!text || !learnings.repo) return;
+  const button = $('#learn-submit');
+  button.disabled = true;
+  const body = { repo: learnings.repo, text, path_glob: $('#learn-glob').value.trim() };
+  try {
+    if (learnings.editing) {
+      await api('/api/learnings', { method: 'PATCH', body: { ...body, id: learnings.editing } });
+      toast('Learning updated');
+    } else {
+      await api('/api/learnings', { method: 'POST', body });
+      toast('Learning added');
+    }
+    resetLearningForm();
+    await loadLearnings();
+  } catch (error) {
+    if (error.message !== 'Unauthorized') toast(error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function setLearningEnabled(id, enabled) {
+  try {
+    await api('/api/learnings', { method: 'PATCH', body: { repo: learnings.repo, id, enabled } });
+    await loadLearnings();
+  } catch (error) {
+    if (error.message !== 'Unauthorized') toast(error.message);
+  }
+}
+
+async function deleteLearning(id) {
+  try {
+    await api(`/api/learnings?repo=${encodeURIComponent(learnings.repo)}&id=${id}`, { method: 'DELETE' });
+    if (learnings.editing === id) resetLearningForm();
+    toast('Learning removed');
+    await loadLearnings();
+  } catch (error) {
+    if (error.message !== 'Unauthorized') toast(error.message);
+  }
+}
+
+function startEditLearning(id) {
+  const item = learnings.items.find((entry) => entry.id === id);
+  if (!item) return;
+  learnings.editing = id;
+  $('#learn-text').value = item.text;
+  $('#learn-glob').value = item.path_glob || '';
+  $('#learn-submit').textContent = 'Save changes';
+  $('#learn-cancel').hidden = false;
+  $('#learn-text').focus();
+}
+
+function resetLearningForm() {
+  learnings.editing = 0;
+  $('#learn-text').value = '';
+  $('#learn-glob').value = '';
+  $('#learn-submit').textContent = 'Add learning';
+  $('#learn-cancel').hidden = true;
+}
+
+/* ── drawer ────────────────────────────────────────────────────────────── */
+
+async function openReview(id) {
+  state.lastFocus = document.activeElement;
+  $('#scrim').hidden = false;
+  $('#drawer').classList.add('is-open');
+  $('#drawer').setAttribute('aria-hidden', 'false');
+  $('#drawer-kicker').textContent = 'Review';
+  $('#drawer-title').textContent = 'Loading…';
+  $('#drawer-body').innerHTML = '<div class="skeleton-block skeleton-tall"></div>';
+  setTimeout(() => $('#drawer-close').focus(), 60);
+
+  try {
+    const data = await api(`/api/reviews/${encodeURIComponent(id)}`);
+    renderReviewDetail(data.review, data.findings || []);
+  } catch (error) {
+    if (error.message !== 'Unauthorized') {
+      $('#drawer-title').textContent = 'Could not load review';
+      $('#drawer-body').innerHTML = emptyState('Unavailable', error.message);
+    }
+  }
+}
+
+function renderReviewDetail(review, findings) {
+  $('#drawer-kicker').textContent = `${review.repo} · #${review.pr}`;
+  $('#drawer-title').textContent = review.title || `Pull request #${review.pr}`;
+
+  const chips = [
+    `<span class="verdict ${verdictClass(review.verdict)}">${esc(verdictLabel(review.verdict))}</span>`,
+    `<span class="detail-chip">${num(review.findings)} findings</span>`,
+    review.model ? `<span class="detail-chip">${esc(review.model)}</span>` : '',
+    review.files ? `<span class="detail-chip">${num(review.files)} files · +${num(review.additions)} / -${num(review.deletions)}</span>` : '',
+    review.duration_ms ? `<span class="detail-chip"><svg><use href="#i-clock"/></svg>${duration(review.duration_ms)}</span>` : '',
+    (review.prompt_tokens || review.completion_tokens)
+      ? `<span class="detail-chip">${num((review.prompt_tokens || 0) + (review.completion_tokens || 0))} tokens</span>`
+      : '',
+    review.context_chars
+      ? `<span class="detail-chip">${num(review.context_chars)} context chars</span>`
+      : '',
+    review.merged ? '<span class="detail-chip">Merged automatically</span>' : '',
+  ].filter(Boolean).join('');
+
+  const list = findings.length
+    ? findings.map((f) => {
+      const sources = f.evidence && Array.isArray(f.evidence.sources) && f.evidence.sources.length
+        ? `<div class="finding-sources">
+            <span>Sources</span>
+            ${f.evidence.sources.map((s) => `<a href="${esc(safeUrl(s.url))}" target="_blank" rel="noopener noreferrer">${esc(s.title || s.url)}</a>`).join('')}
+          </div>`
+        : '';
+      const verified = f.evidence_note
+        ? `<p class="verified-note">${esc(f.evidence_note)}</p>`
+        : '';
+      return `<article class="finding">
+        <div class="finding-top">
+          <span class="sev sev-${esc(f.severity || 'low')}"></span>
+          <span class="finding-title">${esc(f.title)}</span>
+          <span class="finding-loc">${esc(f.file)}:${f.line}</span>
+        </div>
+        <p class="finding-detail">${esc(f.detail)}</p>
+        ${f.fix ? `<p class="finding-fix"><strong>Fix:</strong> ${esc(f.fix)}</p>` : ''}
+        ${verified}
+        ${sources}
+      </article>`;
+    }).join('')
+    : `<div class="drawer-empty">
+        <strong>No findings</strong>
+        <span>The review approved this change without issues.</span>
+      </div>`;
+
+  const link = review.url
+    ? `<a class="detail-link" href="${esc(safeUrl(review.url))}" target="_blank" rel="noopener noreferrer">Open on GitHub <svg><use href="#i-external"/></svg></a>`
+    : '';
+
+  $('#drawer-body').innerHTML = `${link}<div class="detail-meta">${chips}</div>${list}`;
+}
+
+function closeDrawer() {
+  $('#drawer').classList.remove('is-open');
+  $('#drawer').setAttribute('aria-hidden', 'true');
+  $('#scrim').hidden = true;
+  if (state.lastFocus && typeof state.lastFocus.focus === 'function') state.lastFocus.focus();
+}
+
+/* ── gate ──────────────────────────────────────────────────────────────── */
+
+function openGate() {
+  $('#gate').hidden = false;
+  setTimeout(() => $('#gate-token').focus(), 80);
+}
+
+async function submitGate(event) {
+  event.preventDefault();
+  const button = $('#gate-submit');
+  const error = $('#gate-error');
+  button.disabled = true;
+  error.hidden = true;
+
+  try {
+    const res = await fetch('/api/session', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: $('#gate-token').value }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || 'Invalid token');
+    }
+    window.location.reload();
+  } catch (err) {
+    error.textContent = err.message;
+    error.hidden = false;
+    button.disabled = false;
+  }
+}
+
+/* ── routing & controls ────────────────────────────────────────────────── */
+
+function setView(view) {
+  state.view = view;
+  document.body.dataset.view = view;
+  $$('.nav-item').forEach((el) => el.classList.toggle('is-active', el.dataset.view === view));
+  $$('.view').forEach((el) => { el.hidden = el.id !== `view-${view}`; });
+  $('#page-title').textContent = TITLES[view] || 'Overview';
+  $('#range').hidden = view !== 'overview';
+  $('#live').hidden = view === 'settings';
+
+  if (view === 'reviews') {
+    requestAnimationFrame(movePill);
+    if (!state.reviewsLoaded) {
+      state.reviewsLoaded = true;
+      loadReviews(true);
+    }
+  }
+  if (view === 'repos' && !state.reposLoaded) {
+    state.reposLoaded = true;
+    loadRepos();
+  }
+  if (view === 'learnings') loadLearningsView();
+  if (view === 'settings') loadRuntime();
+}
+
+function route() {
+  const name = window.location.hash.replace(/^#\/?/, '').trim();
+  setView(TITLES[name] ? name : 'overview');
+}
+
+function selectDays(days) {
+  state.days = days;
+  $('#range-label').textContent = `${days} days`;
+  $$('#range-pop button').forEach((el) => {
+    el.setAttribute('aria-selected', String(Number(el.dataset.days) === days));
+  });
+  loadOverview(false).catch((error) => {
+    if (error.message !== 'Unauthorized') toast(error.message);
+  });
+}
+
+let searchTimer;
+function bindSearch() {
+  const input = $('#search');
+  const clear = $('#search-clear');
+
+  input.addEventListener('input', () => {
+    clear.hidden = !input.value;
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => {
+      state.q = input.value.trim();
+      loadReviews(true);
+    }, 260);
+  });
+
+  clear.addEventListener('click', () => {
+    input.value = '';
+    clear.hidden = true;
+    state.q = '';
+    input.focus();
+    loadReviews(true);
+  });
+}
+
+function bindMenu() {
+  const menu = $('#range');
+  const trigger = $('#range-trigger');
+  const pop = $('#range-pop');
+
+  const setOpen = (open) => {
+    menu.classList.toggle('is-open', open);
+    trigger.setAttribute('aria-expanded', String(open));
+    if (open) {
+      const selected = pop.querySelector('[aria-selected="true"]') || pop.querySelector('button');
+      if (selected) selected.focus();
+    }
+  };
+
+  trigger.addEventListener('click', () => setOpen(!menu.classList.contains('is-open')));
+  trigger.addEventListener('keydown', (event) => {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setOpen(true);
+    }
+  });
+
+  pop.addEventListener('click', (event) => {
+    const button = event.target.closest('button[data-days]');
+    if (!button) return;
+    selectDays(Number(button.dataset.days));
+    setOpen(false);
+    trigger.focus();
+  });
+
+  pop.addEventListener('keydown', (event) => {
+    const items = $$('button', pop);
+    const index = items.indexOf(document.activeElement);
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      items[(index + 1) % items.length].focus();
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      items[(index - 1 + items.length) % items.length].focus();
+    } else if (event.key === 'Escape') {
+      setOpen(false);
+      trigger.focus();
+    }
+  });
+
+  document.addEventListener('click', (event) => {
+    if (!menu.contains(event.target)) setOpen(false);
+  });
+}
+
+function bind() {
+  $$('.nav-item').forEach((el) => {
+    el.addEventListener('click', () => {
+      window.location.hash = `#/${el.dataset.view}`;
+    });
+  });
+
+  window.addEventListener('hashchange', route);
+
+  $$('#verdict-filter .seg-btn').forEach((el) => {
+    el.addEventListener('click', () => {
+      if (el.classList.contains('is-active')) return;
+      $$('#verdict-filter .seg-btn').forEach((b) => {
+        const active = b === el;
+        b.classList.toggle('is-active', active);
+        b.setAttribute('aria-selected', String(active));
+      });
+      state.verdict = el.dataset.verdict;
+      movePill();
+      loadReviews(true);
+    });
+  });
+
+  bindSearch();
+  bindMenu();
+  window.addEventListener('resize', () => { if (state.view === 'reviews') movePill(); });
+
+  $('#see-all').addEventListener('click', () => { window.location.hash = '#/reviews'; });
+
+  $('#learn-form').addEventListener('submit', submitLearning);
+  $('#learn-cancel').addEventListener('click', resetLearningForm);
+  $('#learn-refresh').addEventListener('click', () => loadLearnings());
+  $('#learn-repo').addEventListener('change', (event) => {
+    learnings.repo = event.target.value;
+    resetLearningForm();
+    loadLearnings();
+  });
+
+  $('#refresh').addEventListener('click', async () => {
+    const button = $('#refresh');
+    button.classList.add('is-spinning');
+    try {
+      if (state.view === 'overview') await loadOverview(false);
+      else if (state.view === 'reviews') await loadReviews(true);
+      else if (state.view === 'repos') await loadRepos();
+      else if (state.view === 'learnings') await loadLearnings();
+      else await loadRuntime();
+      toast('Refreshed');
+    } catch (error) {
+      if (error.message !== 'Unauthorized') toast(error.message);
+    } finally {
+      setTimeout(() => button.classList.remove('is-spinning'), 700);
+    }
+  });
+
+  $('#load-more').addEventListener('click', () => loadReviews(false));
+
+  $('#drawer-close').addEventListener('click', closeDrawer);
+  $('#scrim').addEventListener('click', closeDrawer);
+
+  $('#gate-form').addEventListener('submit', submitGate);
+
+  $('#copy-env').addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText($('#env-snippet').textContent);
+      toast('Config copied');
+    } catch {
+      toast('Could not access the clipboard');
+    }
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && $('#drawer').classList.contains('is-open')) closeDrawer();
+    if (event.key === '/' && document.activeElement !== $('#search') && state.view === 'reviews') {
+      event.preventDefault();
+      $('#search').focus();
+    }
+  });
+
+  let resizeTimer;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => { if (state.view === 'reviews') movePill(); }, 120);
+  });
+}
+
+/* ── boot ──────────────────────────────────────────────────────────────── */
+
+document.addEventListener('DOMContentLoaded', () => {
+  bind();
+  route();
+  loadOverview(false).catch((error) => {
+    if (error.message !== 'Unauthorized') {
+      toast(error.message);
+      $('#app').setAttribute('aria-busy', 'false');
+    }
+  });
+
+  setInterval(() => {
+    if (document.visibilityState === 'visible' && state.view === 'overview') {
+      loadOverview(true).catch(() => {});
+    }
+  }, 60000);
+});
