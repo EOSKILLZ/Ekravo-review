@@ -16,37 +16,39 @@ var severityBadge = map[Severity]string{
 
 var verdictHeader = map[string]string{
 	"approve":     "✅ Approved",
-	"suggestions": "⚠️ Approved with suggestions",
-	"changes":     "❌ Changes requested",
+	"suggestions": "🟡 Approved with suggestions",
+	"changes":     "🔴 Changes requested",
 }
 
-// InlineBody renders the comment attached to one line of the diff.
+// InlineBody renders the comment attached to one line of the diff. GitHub nests
+// these under the changed line, so the severity leads, the title is the largest
+// element, and the fix stays above the fold.
 func InlineBody(f Finding) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s · %s\n\n", severityBadge[f.Severity], titleCase(f.Category))
+	fmt.Fprintf(&b, "> %s · %s\n\n", severityBadge[f.Severity], titleCase(f.Category))
 	fmt.Fprintf(&b, "**%s**\n\n", f.Title)
 	if f.Detail != "" {
 		b.WriteString(f.Detail + "\n\n")
 	}
 	if f.Fix != "" {
-		fmt.Fprintf(&b, "**Suggested fix:** %s\n", f.Fix)
+		b.WriteString("**Suggested fix**\n\n")
+		b.WriteString(f.Fix + "\n\n")
 	}
 	if f.Evidence != nil && len(f.Evidence.Sources) > 0 {
-		b.WriteString("\n")
+		b.WriteString("<details>\n<summary>🔗 Sources</summary>\n\n")
 		if f.EvidenceNote != "" {
-			fmt.Fprintf(&b, "**Checked against sources:** %s\n\n", f.EvidenceNote)
-		} else {
-			b.WriteString("**Checked against sources:**\n\n")
+			b.WriteString(f.EvidenceNote + "\n\n")
 		}
 		for _, s := range f.Evidence.Sources {
 			fmt.Fprintf(&b, "- [%s](%s)\n", s.Title, s.URL)
 		}
+		b.WriteString("\n</details>\n\n")
 	}
-	b.WriteString("\n<sub>🔎 Ekravo Review</sub>")
+	b.WriteString("<sub>🔎 Ekravo Review</sub>")
 	return b.String()
 }
 
-// Summary renders the review body shown alongside the inline comments.
+// SummaryInput is everything the review body needs to describe one run.
 type SummaryInput struct {
 	Meta        Meta
 	Findings    []Finding
@@ -58,92 +60,65 @@ type SummaryInput struct {
 	Failed      int
 	Sections    int
 	Incremental bool
+	Commit      string
+	Duration    time.Duration
 }
 
+// Summary renders the review body shown alongside the inline comments. It is
+// plain GitHub-flavored markdown: an alert callout for the verdict, a stat
+// strip, then a table of findings.
 func Summary(in SummaryInput) string {
 	var b strings.Builder
 
-	label := "Review"
-	if in.Incremental {
-		label = "Re-review"
+	headline := verdictHeader[in.Verdict.Decision]
+	if headline == "" {
+		headline = "Review posted"
 	}
-	fmt.Fprintf(&b, "## 🔎 Ekravo Review %s &nbsp; %s\n\n", label, verdictHeader[in.Verdict.Decision])
+	if in.Incremental {
+		headline += " · re-review"
+	}
+	fmt.Fprintf(&b, "## 🔎 Ekravo Review — %s\n\n", headline)
 
 	repo := in.Meta.Repo
 	if repo == "" {
 		repo = in.Meta.Base
 	}
 	prURL := fmt.Sprintf("https://github.com/%s/pull/%d", repo, in.Meta.Number)
-	parts := []string{fmt.Sprintf("[#%d · %s](%s)", in.Meta.Number, in.Meta.Title, prURL)}
-	if in.Meta.ChangedFiles > 0 {
-		parts = append(parts, fmt.Sprintf("%d file(s) · +%d / -%d",
-			in.Meta.ChangedFiles, in.Meta.Additions, in.Meta.Deletions))
-	}
+	fmt.Fprintf(&b, "**[#%d · %s](%s)**", in.Meta.Number, in.Meta.Title, prURL)
 	if in.Meta.Author != "" {
-		parts = append(parts, "@"+in.Meta.Author)
+		fmt.Fprintf(&b, " · @%s", in.Meta.Author)
 	}
-	fmt.Fprintf(&b, "> %s\n\n---\n\n", strings.Join(parts, " &nbsp;·&nbsp; "))
+	b.WriteString("\n\n")
 
-	if len(in.Findings) == 0 {
-		b.WriteString("No issues found. The changes look safe to merge.\n")
-	} else {
-		fmt.Fprintf(&b, "**%d finding(s):** %d critical · %d high · %d medium · %d low\n\n",
-			len(in.Findings),
-			in.Verdict.Counts[Critical], in.Verdict.Counts[High],
-			in.Verdict.Counts[Medium], in.Verdict.Counts[Low])
-
-		grouped := map[string][]Finding{}
-		var files []string
-		for _, f := range in.Findings {
-			if _, ok := grouped[f.File]; !ok {
-				files = append(files, f.File)
-			}
-			grouped[f.File] = append(grouped[f.File], f)
-		}
-		sort.Strings(files)
-
-		for _, file := range files {
-			fmt.Fprintf(&b, "### `%s`\n\n", file)
-			for _, f := range grouped[file] {
-				fmt.Fprintf(&b, "- **`%s:%d`** %s — **%s**\n", f.File, f.Line, severityBadge[f.Severity], f.Title)
-				if f.Detail != "" {
-					fmt.Fprintf(&b, "  %s\n", f.Detail)
-				}
-				if f.Fix != "" {
-					fmt.Fprintf(&b, "  _Fix:_ %s\n", f.Fix)
-				}
-			}
-			b.WriteString("\n")
-		}
-	}
-
-	if in.Dropped > 0 {
-		fmt.Fprintf(&b, "\n<sub>%d model finding(s) were discarded because they did not point at a changed line in this PR.</sub>\n", in.Dropped)
-	}
-	if in.Truncated {
-		b.WriteString("\n> ⚠️ The diff exceeded the review budget; only the shown portion was reviewed.\n")
-	}
-	if in.Failed > 0 && in.Sections > 0 {
-		fmt.Fprintf(&b, "\n> ⚠️ %d of %d review sections failed and were skipped; the findings below are from the sections that succeeded.\n", in.Failed, in.Sections)
-	}
+	b.WriteString(verdictCallout(in.Verdict))
+	b.WriteString(statsTable(in))
+	b.WriteString("\n")
 
 	if len(in.Findings) > 0 {
-		b.WriteString("\n<details>\n<summary>💡 Using an AI agent? Paste this to fix the findings:</summary>\n\n")
+		b.WriteString("### Findings\n\n")
+		b.WriteString(findingsTable(in.Findings))
+		b.WriteString("\n")
+
+		b.WriteString("<details>\n<summary>🤖 Fix these with an AI agent</summary>\n\n")
 		b.WriteString("````text\n")
 		fmt.Fprintf(&b, "Fix these code review findings in PR #%d (%s). For each one, quote the file and line, show the corrected code, and explain the fix in one sentence.\n\n",
 			in.Meta.Number, in.Meta.Title)
 		for _, f := range in.Findings {
 			fmt.Fprintf(&b, "- %s:%d [%s/%s] %s — %s\n", f.File, f.Line, f.Severity, f.Category, f.Title, f.Fix)
 		}
-		b.WriteString("````\n\n</details>\n")
+		b.WriteString("````\n\n</details>\n\n")
 	}
 
-	events := map[string]string{
-		"approve":     "✅ **Approved — safe to merge.**",
-		"suggestions": "⚠️ **Approved with suggestions — safe to merge, consider the notes above.**",
-		"changes":     "❌ **Changes requested — resolve the blocking findings before merging.**",
+	if in.Truncated {
+		b.WriteString("> [!IMPORTANT]\n> The diff exceeded the review budget, so only part of this PR was reviewed.\n\n")
 	}
-	fmt.Fprintf(&b, "\n---\n\n> %s\n\n", events[in.Verdict.Decision])
+	if in.Failed > 0 && in.Sections > 0 {
+		fmt.Fprintf(&b, "> [!WARNING]\n> %d of %d review sections failed and were skipped; these findings come from the sections that succeeded.\n\n",
+			in.Failed, in.Sections)
+	}
+	if in.Dropped > 0 {
+		fmt.Fprintf(&b, "<sub>%d model finding(s) were discarded because they did not point at a changed line in this PR.</sub>\n\n", in.Dropped)
+	}
 
 	model := in.Model
 	if model == "" {
@@ -153,9 +128,82 @@ func Summary(in SummaryInput) string {
 	if handle == "" {
 		handle = "ekravo-review"
 	}
-	fmt.Fprintf(&b, "<sub>Reviewed by `%s` · %s</sub>\n", model, time.Now().UTC().Format("2006-01-02 15:04 UTC"))
-	fmt.Fprintf(&b, "<sub>Commands: `@%s review` · `@%s explain` · `@%s summarize` · [Ekravo Review](https://github.com/EOSKILLZ/ekravo-review)</sub>\n", handle, handle, handle)
+	meta := []string{fmt.Sprintf("Reviewed by `%s`", model)}
+	if in.Commit != "" {
+		sha := in.Commit
+		if len(sha) > 7 {
+			sha = sha[:7]
+		}
+		meta = append(meta, fmt.Sprintf("commit `%s`", sha))
+	}
+	meta = append(meta, time.Now().UTC().Format("2006-01-02 15:04 UTC"))
+	fmt.Fprintf(&b, "<sub>🔎 %s</sub>\n", strings.Join(meta, " · "))
+	fmt.Fprintf(&b, "<sub>`@%s review` · `@%s explain` · `@%s summarize` · [Ekravo Review](https://github.com/EOSKILLZ/ekravo-review)</sub>\n", handle, handle, handle)
 	return b.String()
+}
+
+func verdictCallout(v Verdict) string {
+	switch v.Decision {
+	case "changes":
+		reason := strings.TrimSuffix(strings.TrimSpace(v.Reason), ".")
+		if reason == "" {
+			reason = "blocking findings must be resolved before merging"
+		}
+		return fmt.Sprintf("> [!WARNING]\n> **Changes requested** — %s.\n\n", reason)
+	case "suggestions":
+		return "> [!NOTE]\n> **Approved with suggestions** — no blocking issues, so this is safe to merge; the inline notes are optional improvements.\n\n"
+	default:
+		return "> [!TIP]\n> **Approved** — no issues found. Safe to merge.\n\n"
+	}
+}
+
+func statsTable(in SummaryInput) string {
+	files, lines := "—", "—"
+	if in.Meta.ChangedFiles > 0 {
+		files = fmt.Sprintf("%d", in.Meta.ChangedFiles)
+		lines = fmt.Sprintf("+%d −%d", in.Meta.Additions, in.Meta.Deletions)
+	}
+	took := "—"
+	if in.Duration > 0 {
+		took = in.Duration.Round(100 * time.Millisecond).String()
+	}
+	var b strings.Builder
+	b.WriteString("| Files | Lines | Findings | Reviewed in |\n")
+	b.WriteString("|:--:|:--:|:--:|:--:|\n")
+	fmt.Fprintf(&b, "| %s | %s | %d | %s |\n", files, lines, len(in.Findings), took)
+	return b.String()
+}
+
+func findingsTable(findings []Finding) string {
+	sorted := append([]Finding(nil), findings...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		if a, b := severityRank(sorted[i].Severity), severityRank(sorted[j].Severity); a != b {
+			return a > b
+		}
+		if sorted[i].File != sorted[j].File {
+			return sorted[i].File < sorted[j].File
+		}
+		return sorted[i].Line < sorted[j].Line
+	})
+
+	var b strings.Builder
+	b.WriteString("| Severity | Location | Finding |\n")
+	b.WriteString("|:--|:--|:--|\n")
+	for _, f := range sorted {
+		finding := "**" + mdCell(f.Title) + "**"
+		if category := titleCase(f.Category); category != "" {
+			finding += " · " + mdCell(category)
+		}
+		fmt.Fprintf(&b, "| %s | `%s:%d` | %s |\n", severityBadge[f.Severity], f.File, f.Line, finding)
+	}
+	return b.String()
+}
+
+// mdCell keeps model-written text from breaking out of a table cell.
+func mdCell(s string) string {
+	s = strings.ReplaceAll(s, "|", "\\|")
+	s = strings.ReplaceAll(s, "\n", " ")
+	return strings.TrimSpace(s)
 }
 
 // CommandsFooter is appended to command responses.

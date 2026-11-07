@@ -385,6 +385,8 @@ func (a *App) ReviewPR(ctx context.Context, repo string, number int, force bool)
 		Failed:      failed,
 		Sections:    len(sections),
 		Incremental: incremental,
+		Commit:      pr.Head.SHA,
+		Duration:    time.Since(started),
 	})
 	if len(summary) > maxBodyChars {
 		summary = summary[:maxBodyChars]

@@ -77,7 +77,7 @@ func TestMarkVerifiedCapsSourcesAndRendersCitations(t *testing.T) {
 		t.Fatalf("sources = %d, want 3", len(f.Evidence.Sources))
 	}
 	body := InlineBody(f)
-	for _, want := range []string{"Checked against sources", "The docs confirm it.", "https://example.com/3"} {
+	for _, want := range []string{"🔗 Sources", "The docs confirm it.", "https://example.com/3"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("inline body missing %q:\n%s", want, body)
 		}
