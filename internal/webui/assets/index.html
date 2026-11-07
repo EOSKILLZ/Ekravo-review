@@ -173,10 +173,17 @@
           <h2 class="queue-title">Prioritize across all pull requests</h2>
           <p class="queue-sub">Blocking findings come first, so the PRs that need work never wait behind the clean ones.</p>
         </div>
-        <div class="search">
-          <svg class="search-icon"><use href="#i-search"/></svg>
-          <input id="search" type="text" placeholder="Search repo, PR or title" aria-label="Search reviews" autocomplete="off" spellcheck="false">
-          <button class="search-clear" id="search-clear" aria-label="Clear search" hidden><svg><use href="#i-x"/></svg></button>
+        <div class="queue-controls">
+          <div class="seg" id="review-sort" role="tablist" aria-label="Sort reviews">
+            <span class="seg-pill" aria-hidden="true"></span>
+            <button class="seg-btn is-active" role="tab" aria-selected="true" data-review-sort="newest">Newest</button>
+            <button class="seg-btn" role="tab" aria-selected="false" data-review-sort="repo">Repository</button>
+          </div>
+          <div class="search">
+            <svg class="search-icon"><use href="#i-search"/></svg>
+            <input id="search" type="text" placeholder="Search repo, PR or title" aria-label="Search reviews" autocomplete="off" spellcheck="false">
+            <button class="search-clear" id="search-clear" aria-label="Clear search" hidden><svg><use href="#i-x"/></svg></button>
+          </div>
         </div>
       </div>
 

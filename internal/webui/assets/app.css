@@ -523,6 +523,8 @@ body::after {
 .queue-title { margin: 6px 0 0; font-size: clamp(21px, 2.2vw, 26px); font-weight: 500; letter-spacing: -.038em; }
 .queue-sub { margin: 7px 0 0; font-size: 12px; color: var(--muted); max-width: 58ch; }
 .queue-intro .search { flex: 0 1 320px; }
+.queue-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+.queue-controls .search { flex: 0 1 300px; }
 
 .queue-board {
   display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
@@ -545,6 +547,12 @@ body::after {
   color: var(--muted); font-variant-numeric: tabular-nums; flex: none;
 }
 .queue-list { display: flex; flex-direction: column; gap: 10px; padding-top: 14px; }
+.queue-group {
+  display: flex; align-items: center; gap: 7px; padding: 8px 2px 0;
+  font-family: var(--mono); font-size: 10px; letter-spacing: -.01em; color: var(--muted-2);
+}
+.queue-group:first-child { padding-top: 0; }
+.queue-group svg { width: 12px; height: 12px; }
 
 .queue-card {
   display: flex; flex-direction: column; width: 100%; min-width: 0; text-align: left;
@@ -1024,6 +1032,7 @@ code { font-family: var(--mono); font-size: .92em; color: var(--ink); background
   .pulse { grid-column: span 2; }
   .queue-intro { align-items: flex-start; }
   .queue-intro .search { flex-basis: 100%; width: 100%; }
+  .queue-controls { width: 100%; justify-content: flex-start; }
   .queue-board { grid-template-columns: 1fr; }
   .queue-col + .queue-col { border-left: 0; border-top: 1px solid var(--line); }
   .settings-grid { grid-template-columns: 1fr; }

@@ -9,6 +9,7 @@ const state = {
   q: '',
   counts: {},
   stateCounts: {},
+  reviewSort: 'newest',
   offset: 0,
   total: 0,
   reviews: [],
@@ -442,7 +443,21 @@ function renderQueueColumn(host, reviews, emptyTitle, emptyCopy) {
     host.innerHTML = `<div class="queue-empty"><strong>${esc(emptyTitle)}</strong><span>${esc(emptyCopy)}</span></div>`;
     return;
   }
-  host.innerHTML = reviews.map(queueCard).join('');
+  if (state.reviewSort !== 'repo') {
+    host.innerHTML = reviews.map(queueCard).join('');
+    return;
+  }
+  let lastRepo = '';
+  const parts = [];
+  for (const review of reviews) {
+    const key = String(review.repo || '').toLowerCase();
+    if (key !== lastRepo) {
+      lastRepo = key;
+      parts.push(`<div class="queue-group"><svg><use href="#i-repo"/></svg><span>${esc(review.repo)}</span></div>`);
+    }
+    parts.push(queueCard(review));
+  }
+  host.innerHTML = parts.join('');
 }
 
 function renderReviews() {
@@ -457,10 +472,13 @@ function renderReviews() {
     : active.filter(isBlocking).length;
   const restTotal = Math.max(0, activeTotal - blockingTotal);
 
-  const blocking = active.filter(isBlocking).sort((a, b) => {
-    const rank = { p0: 0, p1: 1, p2: 2 };
-    return rank[priorityOf(a)] - rank[priorityOf(b)];
-  });
+  const blocking = active.filter(isBlocking);
+  if (state.reviewSort !== 'repo') {
+    blocking.sort((a, b) => {
+      const rank = { p0: 0, p1: 1, p2: 2 };
+      return rank[priorityOf(a)] - rank[priorityOf(b)];
+    });
+  }
   const rest = active.filter((review) => !isBlocking(review));
 
   $('#review-count').textContent = !state.total
@@ -509,6 +527,7 @@ async function loadReviews(reset) {
   const params = new URLSearchParams({
     limit: '100',
     offset: String(reset ? 0 : state.offset),
+    sort: state.reviewSort,
   });
   if (state.q) params.set('q', state.q);
 
@@ -547,6 +566,7 @@ function movePill(selector = '#repo-filter') {
 
 function moveActivePill() {
   if (state.view === 'repos') movePill('#repo-filter');
+  if (state.view === 'reviews') movePill('#review-sort');
 }
 
 /* ── repositories ──────────────────────────────────────────────────────── */
@@ -1106,6 +1126,7 @@ function setView(view) {
       state.reviewsLoaded = true;
       loadReviews(true);
     }
+    requestAnimationFrame(() => movePill('#review-sort'));
   }
   if (view === 'repos' && !state.reposLoaded) {
     state.reposLoaded = true;
@@ -1275,6 +1296,18 @@ function bind() {
 
   bindSearch();
   bindMenu();
+  $$('#review-sort .seg-btn').forEach((el) => {
+    el.addEventListener('click', () => {
+      if (state.reviewSort === el.dataset.reviewSort) return;
+      state.reviewSort = el.dataset.reviewSort || 'newest';
+      $$('#review-sort .seg-btn').forEach((btn) => {
+        btn.classList.toggle('is-active', btn === el);
+        btn.setAttribute('aria-selected', String(btn === el));
+      });
+      movePill('#review-sort');
+      loadReviews(true);
+    });
+  });
   window.addEventListener('resize', moveActivePill);
 
   $('#see-all').addEventListener('click', () => { window.location.hash = '#/reviews'; });

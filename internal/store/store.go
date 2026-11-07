@@ -343,6 +343,7 @@ func (s *Store) ReviewByID(ctx context.Context, id int64) (*Review, bool, error)
 type ReviewFilter struct {
 	Verdict string
 	Query   string
+	Sort    string
 	Limit   int
 	Offset  int
 }
@@ -360,6 +361,11 @@ func (s *Store) ListReviews(ctx context.Context, f ReviewFilter) ([]Review, int,
 		like := "%" + q + "%"
 		where = append(where, "(repo LIKE ? OR title LIKE ? OR CAST(pr AS TEXT) LIKE ?)")
 		args = append(args, like, like, like)
+	}
+
+	order := "id DESC"
+	if strings.EqualFold(strings.TrimSpace(f.Sort), "repo") {
+		order = "repo COLLATE NOCASE ASC, id DESC"
 	}
 
 	clause := strings.Join(where, " AND ")
@@ -382,7 +388,7 @@ func (s *Store) ListReviews(ctx context.Context, f ReviewFilter) ([]Review, int,
 
 	queryArgs := append(append([]any{}, args...), limit, offset)
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT `+reviewColumns+` FROM reviews WHERE `+clause+` ORDER BY id DESC LIMIT ? OFFSET ?`,
+		`SELECT `+reviewColumns+` FROM reviews WHERE `+clause+` ORDER BY `+order+` LIMIT ? OFFSET ?`,
 		queryArgs...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list reviews: %w", err)

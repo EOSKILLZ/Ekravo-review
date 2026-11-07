@@ -229,9 +229,14 @@ func (s *Server) handleReviews(w http.ResponseWriter, r *http.Request) {
 	if len(search) > 200 {
 		search = search[:200]
 	}
+	sort := strings.ToLower(strings.TrimSpace(q.Get("sort")))
+	if sort != "repo" {
+		sort = "newest"
+	}
 	reviews, total, err := s.store.ListReviews(r.Context(), store.ReviewFilter{
 		Verdict: q.Get("verdict"),
 		Query:   search,
+		Sort:    sort,
 		Limit:   limit,
 		Offset:  offset,
 	})

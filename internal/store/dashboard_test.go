@@ -179,3 +179,36 @@ func TestPRStateTracking(t *testing.T) {
 		t.Fatalf("MarkMerged state = %+v found=%v err=%v", merged, found, err)
 	}
 }
+
+func TestListReviewsSortsByRepository(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+
+	rows := []Review{
+		{Repo: "o/b", PR: 1, HeadSHA: "b1", Verdict: "approve", State: "open"},
+		{Repo: "o/a", PR: 2, HeadSHA: "a2", Verdict: "approve", State: "open"},
+		{Repo: "o/b", PR: 3, HeadSHA: "b3", Verdict: "approve", State: "open"},
+	}
+	for i := range rows {
+		if err := s.SaveReview(ctx, &rows[i]); err != nil {
+			t.Fatalf("SaveReview: %v", err)
+		}
+	}
+
+	newest, _, err := s.ListReviews(ctx, ReviewFilter{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if newest[0].PR != 3 || newest[0].Repo != "o/b" {
+		t.Fatalf("newest order = %+v", newest)
+	}
+
+	byRepo, _, err := s.ListReviews(ctx, ReviewFilter{Sort: "repo", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(byRepo) != 3 || byRepo[0].Repo != "o/a" || byRepo[0].PR != 2 ||
+		byRepo[1].Repo != "o/b" || byRepo[1].PR != 3 || byRepo[2].PR != 1 {
+		t.Fatalf("repo order = %+v", byRepo)
+	}
+}
