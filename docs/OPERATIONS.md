@@ -101,4 +101,7 @@ environment/mounted files and are never written to the database or logs.
 
 Tags build the binary and publish a container image to
 `ghcr.io/ekravo/ekravo-review`. The image is built from the same Dockerfile, so
-`docker compose up -d --build` and the published image behave identically.
+`docker compose up -d --build` and the published image behave identically. New
+GHCR packages are private by default; if anonymous pulls are required, set the
+package visibility to public in its settings, or authenticate with a token that
+has `read:packages`.
