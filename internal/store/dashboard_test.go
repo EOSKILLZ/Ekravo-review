@@ -61,6 +61,21 @@ func TestDashboardQueries(t *testing.T) {
 		t.Fatalf("search = %+v total=%d", search, total)
 	}
 
+	counts, err := s.ReviewCounts(ctx, "")
+	if err != nil {
+		t.Fatalf("ReviewCounts: %v", err)
+	}
+	if len(counts) != 3 || counts["approve"] != 1 || counts["changes"] != 1 || counts["suggestions"] != 1 {
+		t.Fatalf("counts = %+v", counts)
+	}
+	scoped, err := s.ReviewCounts(ctx, "parser")
+	if err != nil {
+		t.Fatalf("ReviewCounts search: %v", err)
+	}
+	if len(scoped) != 1 || scoped["changes"] != 1 {
+		t.Fatalf("scoped counts = %+v", scoped)
+	}
+
 	detail, found, err := s.ReviewByID(ctx, list[0].ID)
 	if err != nil || !found {
 		t.Fatalf("ReviewByID = %v, %v", found, err)

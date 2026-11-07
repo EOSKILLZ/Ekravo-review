@@ -237,12 +237,52 @@ func (s *Server) handleReviews(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "reviews failed"})
 		return
 	}
+	counts, err := s.store.ReviewCounts(r.Context(), search)
+	if err != nil {
+		s.log.Warn("dashboard review counts failed", "err", err)
+		counts = map[string]int{}
+	}
+
+	items := make([]reviewListItem, 0, len(reviews))
+	for _, rv := range reviews {
+		items = append(items, reviewListItem{Review: rv, Severity: highestSeverity(rv.FindingsJSON)})
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
-		"reviews": reviews,
+		"reviews": items,
 		"total":   total,
+		"counts":  counts,
 		"limit":   limit,
 		"offset":  offset,
 	})
+}
+
+// reviewListItem adds the worst finding severity to the list payload so the
+// dashboard can rank reviews without fetching every finding.
+type reviewListItem struct {
+	store.Review
+	Severity string `json:"severity,omitempty"`
+}
+
+func highestSeverity(raw string) string {
+	if strings.TrimSpace(raw) == "" {
+		return ""
+	}
+	var findings []struct {
+		Severity string `json:"severity"`
+	}
+	if err := json.Unmarshal([]byte(raw), &findings); err != nil {
+		return ""
+	}
+	rank := map[string]int{"critical": 4, "high": 3, "medium": 2, "low": 1}
+	best, bestRank := "", 0
+	for _, f := range findings {
+		severity := strings.ToLower(strings.TrimSpace(f.Severity))
+		if rank[severity] > bestRank {
+			best, bestRank = severity, rank[severity]
+		}
+	}
+	return best
 }
 
 func (s *Server) handleReview(w http.ResponseWriter, r *http.Request) {

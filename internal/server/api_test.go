@@ -105,6 +105,39 @@ func TestDashboardOverviewAndReviews(t *testing.T) {
 	}
 }
 
+func TestReviewsReportSeverityAndCounts(t *testing.T) {
+	s, st := dashboardServer(t, "")
+	findings := `[{"title":"Unsanitised input","severity":"high"}]`
+	if err := st.SaveReview(context.Background(), &store.Review{
+		Repo: "o/r", PR: 9, Title: "Risky change", HeadSHA: "sha9",
+		Verdict: "changes", Findings: 1, FindingsJSON: findings,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := get(s.Handler(), "/api/reviews", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("reviews status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Reviews []struct {
+			PR       int    `json:"pr"`
+			Severity string `json:"severity"`
+		} `json:"reviews"`
+		Counts map[string]int `json:"counts"`
+		Total  int            `json:"total"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode reviews: %v", err)
+	}
+	if body.Total != 2 || body.Counts["changes"] != 1 || body.Counts["approve"] != 1 {
+		t.Fatalf("counts = %+v total=%d", body.Counts, body.Total)
+	}
+	if len(body.Reviews) != 2 || body.Reviews[0].PR != 9 || body.Reviews[0].Severity != "high" {
+		t.Fatalf("reviews = %+v", body.Reviews)
+	}
+}
+
 func TestDashboardSessionCookie(t *testing.T) {
 	s, _ := dashboardServer(t, "super-secret-token")
 	h := s.Handler()

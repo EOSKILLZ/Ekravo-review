@@ -6,8 +6,8 @@ const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 const state = {
   view: 'overview',
   days: 14,
-  verdict: 'all',
   q: '',
+  counts: {},
   offset: 0,
   total: 0,
   reviews: [],
@@ -94,7 +94,7 @@ const emptyState = (title, copy) => `
     <p>${esc(copy)}</p>
   </div>`;
 
-const skeletonRows = (n) => Array.from({ length: n }, () => '<div class="skeleton-row"></div>').join('');
+const skeletonCards = (n) => Array.from({ length: n }, () => '<div class="skeleton-card"></div>').join('');
 
 async function api(path, options = {}) {
   const init = {
@@ -381,6 +381,102 @@ function renderRecent(recent) {
 
 let reviewRequest = 0;
 
+const SEVERITY_RANK = { critical: 4, high: 3, medium: 2, low: 1 };
+
+const isBlocking = (review) => review.verdict === 'changes';
+
+function priorityOf(review) {
+  const severity = SEVERITY_RANK[String(review.severity || '').toLowerCase()] || 0;
+  if (isBlocking(review) && severity >= 3) return 'p0';
+  if (isBlocking(review) || review.verdict === 'suggestions') return 'p1';
+  return 'p2';
+}
+
+function queueReason(review) {
+  const severity = String(review.severity || '').toLowerCase();
+  const label = severity ? `${severity[0].toUpperCase()}${severity.slice(1)}-severity` : '';
+  if (isBlocking(review)) {
+    return label
+      ? `${label} finding blocks this PR — fix it before the next review pass.`
+      : 'Changes were requested — resolve the open findings before re-review.';
+  }
+  if (review.verdict === 'suggestions') return 'Advisory notes only — safe to merge once someone has read them.';
+  if (review.verdict === 'approve') return 'Clean review — nothing blocking, ready to merge.';
+  return 'Skipped or imported review — no live verdict was recorded.';
+}
+
+function queueCard(review) {
+  const priority = priorityOf(review);
+  const tags = [
+    `<span class="queue-tag ${verdictClass(review.verdict)}">${esc(verdictLabel(review.verdict))}</span>`,
+    `<span class="queue-tag">${num(review.findings)} finding${review.findings === 1 ? '' : 's'}</span>`,
+  ];
+  if (review.files) tags.push(`<span class="queue-tag">${num(review.files)} file${review.files === 1 ? '' : 's'}</span>`);
+  else if (review.duration_ms) tags.push(`<span class="queue-tag">${duration(review.duration_ms)} review</span>`);
+
+  return `<button type="button" class="queue-card" data-id="${review.id}">
+    <span class="queue-top">
+      <span class="prio ${priority}"><i aria-hidden="true"></i>${priority.toUpperCase()}</span>
+      <span class="queue-time">${relativeTime(review.created_at)}</span>
+    </span>
+    <span class="queue-name">${esc(review.title || `Pull request #${review.pr}`)}</span>
+    <span class="queue-why">${esc(queueReason(review))}</span>
+    <span class="queue-tags">${tags.join('')}</span>
+    <span class="queue-foot">
+      <svg><use href="#i-repo"/></svg>
+      <span class="queue-repo">${esc(review.repo)}</span>
+      <span class="queue-pr">#${review.pr}</span>
+      <span class="queue-chev"><svg><use href="#i-chevron"/></svg></span>
+    </span>
+  </button>`;
+}
+
+function renderQueueColumn(host, reviews, emptyTitle, emptyCopy) {
+  if (!reviews.length) {
+    host.innerHTML = `<div class="queue-empty"><strong>${esc(emptyTitle)}</strong><span>${esc(emptyCopy)}</span></div>`;
+    return;
+  }
+  host.innerHTML = reviews.map(queueCard).join('');
+}
+
+function renderReviews() {
+  const counts = state.counts || {};
+  const blockingTotal = typeof counts.changes === 'number'
+    ? counts.changes
+    : state.reviews.filter(isBlocking).length;
+  const restTotal = Math.max(0, state.total - blockingTotal);
+
+  const blocking = state.reviews.filter(isBlocking).sort((a, b) => {
+    const rank = { p0: 0, p1: 1, p2: 2 };
+    return rank[priorityOf(a)] - rank[priorityOf(b)];
+  });
+  const rest = state.reviews.filter((review) => !isBlocking(review));
+
+  $('#review-count').textContent = !state.total
+    ? 'No reviews'
+    : state.q
+      ? `${num(state.total)} matching review${state.total === 1 ? '' : 's'}`
+      : `${num(state.total)} review${state.total === 1 ? '' : 's'} · ${num(blockingTotal)} need${blockingTotal === 1 ? 's' : ''} attention`;
+
+  const label = (selector, loaded, total) => {
+    const el = $(selector);
+    if (!el) return;
+    el.textContent = loaded < total ? `${num(loaded)}/${num(total)}` : num(total);
+    el.title = `${num(total)} in this column`;
+  };
+  label('#count-now', blocking.length, blockingTotal);
+  label('#count-next', rest.length, restTotal);
+
+  renderQueueColumn($('#review-now'), blocking,
+    'Nothing blocking',
+    state.q ? 'No blocking reviews match your search.' : 'Open a pull request and blocking reviews land here first.');
+  renderQueueColumn($('#review-next'), rest,
+    'Nothing waiting',
+    state.q ? 'No reviews in this column match your search.' : 'Approved and advisory reviews queue up here.');
+
+  $('#load-more').hidden = state.reviews.length >= state.total;
+}
+
 async function loadReviews(reset) {
   if (state.loading && !reset) return;
   const request = ++reviewRequest;
@@ -388,16 +484,16 @@ async function loadReviews(reset) {
 
   if (reset) {
     state.offset = 0;
-    $('#review-list').innerHTML = skeletonRows(6);
+    $('#review-now').innerHTML = skeletonCards(3);
+    $('#review-next').innerHTML = skeletonCards(3);
     $('#load-more').hidden = true;
     $('#review-count').textContent = 'Loading…';
   }
 
   const params = new URLSearchParams({
-    limit: '25',
+    limit: '100',
     offset: String(reset ? 0 : state.offset),
   });
-  if (state.verdict !== 'all') params.set('verdict', state.verdict);
   if (state.q) params.set('q', state.q);
 
   try {
@@ -406,11 +502,14 @@ async function loadReviews(reset) {
     const incoming = Array.isArray(data.reviews) ? data.reviews : [];
     state.reviews = reset ? incoming : state.reviews.concat(incoming);
     state.total = Number(data.total) || 0;
+    state.counts = data.counts && typeof data.counts === 'object' ? data.counts : {};
     state.offset = state.reviews.length;
-    renderReviewList();
+    renderReviews();
   } catch (error) {
     if (request === reviewRequest && error.message !== 'Unauthorized') {
-      $('#review-list').innerHTML = emptyState('Could not load reviews', error.message);
+      const copy = `<div class="queue-empty"><strong>Could not load reviews</strong><span>${esc(error.message)}</span></div>`;
+      $('#review-now').innerHTML = copy;
+      $('#review-next').innerHTML = '';
       toast(error.message);
     }
   } finally {
@@ -418,40 +517,7 @@ async function loadReviews(reset) {
   }
 }
 
-function renderReviewList() {
-  const host = $('#review-list');
-  $('#review-count').textContent = state.total
-    ? `${num(state.total)} review${state.total === 1 ? '' : 's'}`
-    : 'No reviews';
-  $('#load-more').hidden = state.reviews.length >= state.total;
-
-  if (!state.reviews.length) {
-    host.innerHTML = emptyState('Nothing here yet', state.q || state.verdict !== 'all'
-      ? 'No reviews match this filter.'
-      : 'Open a pull request and the first review will land here.');
-    return;
-  }
-
-  host.innerHTML = state.reviews.map((r) => `
-    <button class="row" data-id="${r.id}">
-      <span class="row-main">
-        <span class="row-repo">${esc(r.repo)}</span>
-        <span class="row-title">${esc(r.title || `Pull request #${r.pr}`)}</span>
-      </span>
-      <span class="row-pr">#${r.pr}</span>
-      <span class="verdict ${verdictClass(r.verdict)}">${esc(verdictLabel(r.verdict))}</span>
-      <span class="row-meta">${num(r.findings)} findings${r.duration_ms ? ` · ${duration(r.duration_ms)}` : ''}</span>
-      <span class="row-time">${relativeTime(r.created_at)}</span>
-      <svg><use href="#i-chevron"/></svg>
-    </button>`).join('');
-
-  $$('.row', host).forEach((el) => {
-    el.addEventListener('click', () => openReview(el.dataset.id));
-  });
-  movePill();
-}
-
-function movePill(selector = '#verdict-filter') {
+function movePill(selector = '#repo-filter') {
   const seg = $(selector);
   if (!seg) return;
   const active = seg.querySelector('.seg-btn.is-active');
@@ -463,7 +529,6 @@ function movePill(selector = '#verdict-filter') {
 
 function moveActivePill() {
   if (state.view === 'repos') movePill('#repo-filter');
-  else if (state.view === 'reviews') movePill('#verdict-filter');
 }
 
 /* ── repositories ──────────────────────────────────────────────────────── */
@@ -1013,7 +1078,6 @@ function setView(view) {
   $('#live').hidden = view === 'settings';
 
   if (view === 'reviews') {
-    requestAnimationFrame(movePill);
     if (!state.reviewsLoaded) {
       state.reviewsLoaded = true;
       loadReviews(true);
@@ -1180,18 +1244,9 @@ function bind() {
 
   window.addEventListener('hashchange', route);
 
-  $$('#verdict-filter .seg-btn').forEach((el) => {
-    el.addEventListener('click', () => {
-      if (el.classList.contains('is-active')) return;
-      $$('#verdict-filter .seg-btn').forEach((b) => {
-        const active = b === el;
-        b.classList.toggle('is-active', active);
-        b.setAttribute('aria-selected', String(active));
-      });
-      state.verdict = el.dataset.verdict;
-      movePill();
-      loadReviews(true);
-    });
+  $('#review-board').addEventListener('click', (event) => {
+    const card = event.target.closest('.queue-card');
+    if (card) openReview(card.dataset.id);
   });
 
   bindSearch();

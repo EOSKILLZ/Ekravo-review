@@ -349,6 +349,36 @@ func (s *Store) ListReviews(ctx context.Context, f ReviewFilter) ([]Review, int,
 	return out, total, rows.Err()
 }
 
+// ReviewCounts groups matching reviews by verdict. The dashboard uses it for
+// the Now/Next column totals without paging through the whole history.
+func (s *Store) ReviewCounts(ctx context.Context, query string) (map[string]int, error) {
+	where := "1=1"
+	args := []any{}
+	if q := strings.TrimSpace(query); q != "" {
+		like := "%" + q + "%"
+		where = "(repo LIKE ? OR title LIKE ? OR CAST(pr AS TEXT) LIKE ?)"
+		args = append(args, like, like, like)
+	}
+
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT verdict, COUNT(*) FROM reviews WHERE `+where+` GROUP BY verdict`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("count reviews by verdict: %w", err)
+	}
+	defer rows.Close()
+
+	out := map[string]int{}
+	for rows.Next() {
+		var verdict string
+		var count int
+		if err := rows.Scan(&verdict, &count); err != nil {
+			return nil, fmt.Errorf("count reviews by verdict: %w", err)
+		}
+		out[verdict] = count
+	}
+	return out, rows.Err()
+}
+
 // Totals are the headline counters on the dashboard.
 type Totals struct {
 	Reviews     int `json:"reviews"`
