@@ -294,7 +294,15 @@ func (s *Server) handleRepos(w http.ResponseWriter, r *http.Request) {
 		s.log.Warn("dashboard watch list failed", "err", err)
 		watch = store.Watch{All: true, Repos: []string{}}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"repos": repos, "watch": watch})
+	available := []string{}
+	if s.handlers.AvailableRepos != nil {
+		if list, err := s.handlers.AvailableRepos(r.Context()); err != nil {
+			s.log.Warn("dashboard could not list github repositories", "err", err)
+		} else {
+			available = list
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"repos": repos, "watch": watch, "available": available})
 }
 
 func (s *Server) handleRuntime(w http.ResponseWriter, r *http.Request) {

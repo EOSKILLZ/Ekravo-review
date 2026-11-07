@@ -17,6 +17,7 @@ const state = {
   reviewsLoaded: false,
   reposLoaded: false,
   repoStats: [],
+  available: [],
   watch: { all: true, repos: [] },
   lastFocus: null,
 };
@@ -473,10 +474,28 @@ function repoBars(findings, reviews) {
   }).join('');
 }
 
+// repoList merges review stats with the repositories the bot can actually
+// reach, so an installed repo is selectable before its first review.
+function repoList() {
+  const stats = new Map(state.repoStats.map((repo) => [repo.repo.toLowerCase(), repo]));
+  const names = state.available.length ? state.available : state.repoStats.map((repo) => repo.repo);
+  const seen = new Set();
+  const out = [];
+  for (const name of names) {
+    const key = String(name).toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    const stat = stats.get(key);
+    out.push(stat ? { ...stat, reviewed: true } : { repo: name, reviews: 0, findings: 0, reviewed: false });
+  }
+  return out;
+}
+
 function paintWatchState() {
-  const known = state.repoStats.length;
+  const list = repoList();
+  const known = list.length;
   const all = state.watch.all;
-  const watched = state.repoStats.filter((repo) => isWatched(repo.repo)).length;
+  const watched = list.filter((repo) => isWatched(repo.repo)).length;
 
   const allBtn = $('#watch-all');
   if (allBtn) {
@@ -508,18 +527,23 @@ function paintWatchState() {
 
 function renderRepos() {
   const host = $('#repo-grid');
-  if (!state.repoStats.length) {
-    host.innerHTML = emptyState('No repositories', 'Once the bot reviews a pull request, its repository appears here.');
+  const list = repoList();
+  if (!list.length) {
+    host.innerHTML = emptyState('No repositories yet', 'Install the GitHub App on repositories and they appear here, reviewed or not.');
     paintWatchState();
     return;
   }
 
-  host.innerHTML = state.repoStats.map((repo) => {
+  host.innerHTML = list.map((repo) => {
     const watched = isWatched(repo.repo);
+    const reviewed = repo.reviewed !== false;
+    const chip = reviewed
+      ? `<span class="verdict ${verdictClass(repo.last_verdict)}">${esc(verdictLabel(repo.last_verdict))}</span>`
+      : '<span class="chip">Not reviewed</span>';
     return `<article class="repo-card ${watched ? 'is-watched' : 'is-paused'}" data-repo="${esc(repo.repo)}">
       <div class="repo-top">
         <span class="repo-name">${esc(repo.repo)}</span>
-        <span class="verdict ${verdictClass(repo.last_verdict)}">${esc(verdictLabel(repo.last_verdict))}</span>
+        ${chip}
       </div>
       <div class="repo-nums">
         <div><strong>${num(repo.reviews)}</strong><span>Reviews</span></div>
@@ -527,7 +551,7 @@ function renderRepos() {
       </div>
       <div class="bars" aria-hidden="true">${repoBars(repo.findings, repo.reviews)}</div>
       <div class="repo-foot">
-        <span class="repo-time">Last review ${relativeTime(repo.last_review_at)}</span>
+        <span class="repo-time">${reviewed ? `Last review ${relativeTime(repo.last_review_at)}` : 'No reviews yet'}</span>
         <button class="switch repo-toggle ${watched ? 'is-on' : ''}" role="switch" data-repo="${esc(repo.repo)}"
           aria-checked="${watched}" aria-label="Watch ${esc(repo.repo)}" ${state.watch.all ? 'disabled' : ''}>
           <span class="knob"></span>
@@ -545,6 +569,7 @@ async function loadRepos() {
   try {
     const data = await api('/api/repos');
     state.repoStats = Array.isArray(data.repos) ? data.repos : [];
+    state.available = Array.isArray(data.available) ? data.available : [];
     const watch = data.watch || {};
     state.watch = {
       all: watch.all !== false,

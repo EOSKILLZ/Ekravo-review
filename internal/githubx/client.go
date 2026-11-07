@@ -343,6 +343,62 @@ func (c *Client) GetPullRequest(ctx context.Context, repo string, number int) (*
 }
 
 // ListOpenPullRequests returns every open PR in a repo.
+// ListRepos returns every repository the bot can reach: the App installation's
+// repositories, or the token owner's repositories when running on a PAT. It is
+// best-effort discovery for the dashboard, not an authorization check.
+func (c *Client) ListRepos(ctx context.Context) ([]string, error) {
+	if c.key != nil {
+		var out []string
+		for page := 1; page <= 30; page++ {
+			var batch struct {
+				TotalCount   int `json:"total_count"`
+				Repositories []struct {
+					FullName string `json:"full_name"`
+					Archived bool   `json:"archived"`
+					Disabled bool   `json:"disabled"`
+				} `json:"repositories"`
+			}
+			path := fmt.Sprintf("/installation/repositories?per_page=100&page=%d", page)
+			if err := c.request(ctx, http.MethodGet, path, nil, &batch); err != nil {
+				return nil, err
+			}
+			for _, r := range batch.Repositories {
+				if r.Disabled || r.Archived {
+					continue
+				}
+				out = append(out, r.FullName)
+			}
+			if len(batch.Repositories) < 100 || len(out) >= batch.TotalCount {
+				break
+			}
+		}
+		return out, nil
+	}
+
+	var out []string
+	for page := 1; page <= 30; page++ {
+		var batch []struct {
+			FullName string `json:"full_name"`
+			Archived bool   `json:"archived"`
+			Disabled bool   `json:"disabled"`
+		}
+		path := fmt.Sprintf("/user/repos?per_page=100&affiliation=owner,organization_member&page=%d", page)
+		if err := c.request(ctx, http.MethodGet, path, nil, &batch); err != nil {
+			return nil, err
+		}
+		for _, r := range batch {
+			if r.Disabled || r.Archived {
+				continue
+			}
+			out = append(out, r.FullName)
+		}
+		if len(batch) < 100 {
+			break
+		}
+	}
+	return out, nil
+}
+
 func (c *Client) ListOpenPullRequests(ctx context.Context, repo string) ([]PullRequest, error) {
 	var all []PullRequest
 	for page := 1; page <= 30; page++ {

@@ -125,8 +125,9 @@ func (a *App) Run(ctx context.Context) error {
 			}
 			a.enqueueCommand(repo, number, command)
 		},
-		Ready: func(ctx context.Context) error { return a.st.Ping(ctx) },
-		Store: a.st,
+		Ready:          func(ctx context.Context) error { return a.st.Ping(ctx) },
+		AvailableRepos: a.gh.ListRepos,
+		Store:          a.st,
 	})
 
 	errCh := make(chan error, 1)

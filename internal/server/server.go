@@ -37,10 +37,11 @@ type Metrics struct {
 
 // Handlers are the callbacks invoked for accepted deliveries.
 type Handlers struct {
-	OnPullRequest func(ctx context.Context, repo string, number int, sha string, draft bool)
-	OnCommand     func(ctx context.Context, repo string, number int, command string)
-	Ready         func(ctx context.Context) error
-	Store         *store.Store
+	OnPullRequest  func(ctx context.Context, repo string, number int, sha string, draft bool)
+	OnCommand      func(ctx context.Context, repo string, number int, command string)
+	Ready          func(ctx context.Context) error
+	AvailableRepos func(ctx context.Context) ([]string, error)
+	Store          *store.Store
 }
 
 // Server is the HTTP surface.
