@@ -525,7 +525,7 @@ body::after {
 .queue-intro .search { flex: 0 1 320px; }
 
 .queue-board {
-  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
   border: 1px solid var(--line); border-radius: var(--r); overflow: hidden;
   background:
     radial-gradient(120% 90% at 8% 0%, rgba(255, 255, 255, .04), transparent 55%),

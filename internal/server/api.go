@@ -240,10 +240,15 @@ func (s *Server) handleReviews(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "reviews failed"})
 		return
 	}
-	counts, err := s.store.ReviewCounts(r.Context(), search)
+	counts, err := s.store.ActiveReviewCounts(r.Context(), search)
 	if err != nil {
 		s.log.Warn("dashboard review counts failed", "err", err)
 		counts = map[string]int{}
+	}
+	stateCounts, err := s.store.ReviewStateCounts(r.Context(), search)
+	if err != nil {
+		s.log.Warn("dashboard review state counts failed", "err", err)
+		stateCounts = map[string]int{}
 	}
 
 	items := make([]reviewListItem, 0, len(reviews))
@@ -252,11 +257,12 @@ func (s *Server) handleReviews(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"reviews": items,
-		"total":   total,
-		"counts":  counts,
-		"limit":   limit,
-		"offset":  offset,
+		"reviews":      items,
+		"total":        total,
+		"counts":       counts,
+		"state_counts": stateCounts,
+		"limit":        limit,
+		"offset":       offset,
 	})
 }
 

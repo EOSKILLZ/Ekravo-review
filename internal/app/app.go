@@ -109,6 +109,7 @@ func (a *App) Close() error {
 // available in polling mode too.
 func (a *App) Run(ctx context.Context) error {
 	a.pool.Start(ctx)
+	go a.reconcilePRStates(ctx)
 
 	srv := server.New(a.cfg, a.log, a.metrics, server.Handlers{
 		OnPullRequest: func(ctx context.Context, repo string, number int, _ string, _ bool) error {
@@ -116,10 +117,20 @@ func (a *App) Run(ctx context.Context) error {
 				a.log.Debug("ignoring pull request from unwatched repository", "repo", repo, "pr", number)
 				return nil
 			}
+			if err := a.st.SetPRState(ctx, repo, number, "open"); err != nil {
+				a.log.Warn("could not record open PR state", "repo", repo, "pr", number, "err", err)
+			}
 			if err := a.enqueuePR(repo, number, false); err != nil {
 				return server.ErrQueueFull
 			}
 			return nil
+		},
+		OnClosed: func(ctx context.Context, repo string, number int, merged bool) error {
+			state := "closed"
+			if merged {
+				state = "merged"
+			}
+			return a.st.SetPRState(ctx, repo, number, state)
 		},
 		OnCommand: func(ctx context.Context, repo string, number int, command string) error {
 			if !a.watching(ctx, repo) {
@@ -183,6 +194,41 @@ func (a *App) Run(ctx context.Context) error {
 	_ = srv.Shutdown(shutdownCtx)
 	a.pool.Shutdown(shutdownCtx)
 	return nil
+}
+
+// reconcilePRStates fills in PR state for reviews recorded before the dashboard
+// tracked it. It runs once per start, newest first, and is best-effort: a repo
+// the App can no longer read stays unknown and keeps showing as active.
+func (a *App) reconcilePRStates(ctx context.Context) {
+	refs, err := a.st.UnknownPRStates(ctx, 200)
+	if err != nil {
+		a.log.Warn("could not list reviews with unknown PR state", "err", err)
+		return
+	}
+	if len(refs) == 0 {
+		return
+	}
+	a.log.Info("reconciling PR states", "count", len(refs))
+	for _, ref := range refs {
+		if ctx.Err() != nil {
+			return
+		}
+		pr, err := a.gh.GetPullRequest(ctx, ref.Repo, ref.PR)
+		if err != nil {
+			a.log.Warn("could not fetch PR state", "repo", ref.Repo, "pr", ref.PR, "err", err)
+			continue
+		}
+		state := "open"
+		if pr.State == "closed" {
+			state = "closed"
+			if pr.Merged {
+				state = "merged"
+			}
+		}
+		if err := a.st.SetPRState(ctx, ref.Repo, ref.PR, state); err != nil {
+			a.log.Warn("could not record PR state", "repo", ref.Repo, "pr", ref.PR, "err", err)
+		}
+	}
 }
 
 // Metrics exposes counters (used by tests and operators).
@@ -437,7 +483,7 @@ func (a *App) ReviewPR(ctx context.Context, repo string, number int, force bool)
 	findingsJSON, _ := json.Marshal(findings)
 	if err := a.st.SaveReview(ctx, &store.Review{
 		Repo: repo, PR: number, Title: pr.Title, URL: pr.HTMLURL,
-		HeadSHA: pr.Head.SHA, ReviewID: reviewID,
+		HeadSHA: pr.Head.SHA, ReviewID: reviewID, State: "open",
 		Verdict: verdict.Decision, Findings: len(findings), Model: modelUsed,
 		FindingsJSON: string(findingsJSON), DurationMS: time.Since(started).Milliseconds(),
 		PromptTokens: promptTokens, CompletionTokens: completionTokens,

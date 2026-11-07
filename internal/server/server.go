@@ -42,6 +42,7 @@ type Metrics struct {
 // Handlers are the callbacks invoked for accepted deliveries.
 type Handlers struct {
 	OnPullRequest  func(ctx context.Context, repo string, number int, sha string, draft bool) error
+	OnClosed       func(ctx context.Context, repo string, number int, merged bool) error
 	OnCommand      func(ctx context.Context, repo string, number int, command string) error
 	Ready          func(ctx context.Context) error
 	AvailableRepos func(ctx context.Context) ([]string, error)
@@ -216,6 +217,7 @@ func (s *Server) dispatch(event string, body []byte) error {
 			PullRequest struct {
 				Number int  `json:"number"`
 				Draft  bool `json:"draft"`
+				Merged bool `json:"merged"`
 				Head   struct {
 					SHA string `json:"sha"`
 				} `json:"head"`
@@ -226,6 +228,19 @@ func (s *Server) dispatch(event string, body []byte) error {
 		}
 		switch p.Action {
 		case "opened", "synchronize", "ready_for_review", "reopened":
+		case "closed":
+			repo := p.Repository.FullName
+			if repo == "" || p.PullRequest.Number == 0 {
+				return fmt.Errorf("missing repository or pull request")
+			}
+			if _, ignored := s.cfg.GitHub.IgnoreRepos[strings.ToLower(repo)]; ignored {
+				return nil
+			}
+			if s.handlers.OnClosed != nil {
+				return s.handlers.OnClosed(context.Background(), repo,
+					p.PullRequest.Number, p.PullRequest.Merged)
+			}
+			return nil
 		default:
 			return nil
 		}

@@ -66,6 +66,29 @@ func TestPullRequestWebhookDispatches(t *testing.T) {
 	}
 }
 
+func TestPullRequestClosedDispatches(t *testing.T) {
+	var gotRepo string
+	var gotNumber int
+	var gotMerged bool
+	s := testServer(t, Handlers{
+		OnClosed: func(_ context.Context, repo string, number int, merged bool) error {
+			gotRepo, gotNumber, gotMerged = repo, number, merged
+			return nil
+		},
+	})
+
+	body := `{"action":"closed","repository":{"full_name":"o/r"},` +
+		`"pull_request":{"number":7,"merged":true,"head":{"sha":"abc"}}}`
+	rec := do(s.Handler(), body, "pull_request", sign(body))
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", rec.Code)
+	}
+	if gotRepo != "o/r" || gotNumber != 7 || !gotMerged {
+		t.Fatalf("dispatched %q #%d merged=%v", gotRepo, gotNumber, gotMerged)
+	}
+}
+
 func TestBadSignatureRejected(t *testing.T) {
 	s := testServer(t, Handlers{OnPullRequest: func(context.Context, string, int, string, bool) error {
 		t.Error("callback must not run")

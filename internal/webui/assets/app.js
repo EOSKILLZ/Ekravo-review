@@ -8,6 +8,7 @@ const state = {
   days: 14,
   q: '',
   counts: {},
+  stateCounts: {},
   offset: 0,
   total: 0,
   reviews: [],
@@ -384,6 +385,7 @@ let reviewRequest = 0;
 const SEVERITY_RANK = { critical: 4, high: 3, medium: 2, low: 1 };
 
 const isBlocking = (review) => review.verdict === 'changes';
+const isDone = (review) => review.state === 'merged' || review.state === 'closed';
 
 function priorityOf(review) {
   const severity = SEVERITY_RANK[String(review.severity || '').toLowerCase()] || 0;
@@ -393,6 +395,8 @@ function priorityOf(review) {
 }
 
 function queueReason(review) {
+  if (review.state === 'merged') return 'Merged — this review is finished.';
+  if (review.state === 'closed') return 'Closed without merging — no action needed.';
   const severity = String(review.severity || '').toLowerCase();
   const label = severity ? `${severity[0].toUpperCase()}${severity.slice(1)}-severity` : '';
   if (isBlocking(review)) {
@@ -406,7 +410,9 @@ function queueReason(review) {
 }
 
 function queueCard(review) {
-  const priority = priorityOf(review);
+  const done = isDone(review);
+  const priority = done ? 'p2' : priorityOf(review);
+  const badge = done ? (review.state === 'merged' ? 'MERGED' : 'CLOSED') : priority.toUpperCase();
   const tags = [
     `<span class="queue-tag ${verdictClass(review.verdict)}">${esc(verdictLabel(review.verdict))}</span>`,
     `<span class="queue-tag">${num(review.findings)} finding${review.findings === 1 ? '' : 's'}</span>`,
@@ -416,7 +422,7 @@ function queueCard(review) {
 
   return `<button type="button" class="queue-card" data-id="${review.id}">
     <span class="queue-top">
-      <span class="prio ${priority}"><i aria-hidden="true"></i>${priority.toUpperCase()}</span>
+      <span class="prio ${priority}"><i aria-hidden="true"></i>${badge}</span>
       <span class="queue-time">${relativeTime(review.created_at)}</span>
     </span>
     <span class="queue-name">${esc(review.title || `Pull request #${review.pr}`)}</span>
@@ -441,16 +447,21 @@ function renderQueueColumn(host, reviews, emptyTitle, emptyCopy) {
 
 function renderReviews() {
   const counts = state.counts || {};
+  const done = state.reviews.filter(isDone);
+  const active = state.reviews.filter((review) => !isDone(review));
+  const stateCounts = state.stateCounts || {};
+  const doneTotal = (stateCounts.merged || 0) + (stateCounts.closed || 0);
+  const activeTotal = Math.max(0, state.total - doneTotal);
   const blockingTotal = typeof counts.changes === 'number'
     ? counts.changes
-    : state.reviews.filter(isBlocking).length;
-  const restTotal = Math.max(0, state.total - blockingTotal);
+    : active.filter(isBlocking).length;
+  const restTotal = Math.max(0, activeTotal - blockingTotal);
 
-  const blocking = state.reviews.filter(isBlocking).sort((a, b) => {
+  const blocking = active.filter(isBlocking).sort((a, b) => {
     const rank = { p0: 0, p1: 1, p2: 2 };
     return rank[priorityOf(a)] - rank[priorityOf(b)];
   });
-  const rest = state.reviews.filter((review) => !isBlocking(review));
+  const rest = active.filter((review) => !isBlocking(review));
 
   $('#review-count').textContent = !state.total
     ? 'No reviews'
@@ -466,6 +477,7 @@ function renderReviews() {
   };
   label('#count-now', blocking.length, blockingTotal);
   label('#count-next', rest.length, restTotal);
+  label('#count-done', done.length, doneTotal);
 
   renderQueueColumn($('#review-now'), blocking,
     'Nothing blocking',
@@ -473,6 +485,9 @@ function renderReviews() {
   renderQueueColumn($('#review-next'), rest,
     'Nothing waiting',
     state.q ? 'No reviews in this column match your search.' : 'Approved and advisory reviews queue up here.');
+  renderQueueColumn($('#review-done'), done,
+    'Nothing finished yet',
+    state.q ? 'No merged or closed reviews match your search.' : 'Merged and closed pull requests land here.');
 
   $('#load-more').hidden = state.reviews.length >= state.total;
 }
@@ -486,6 +501,7 @@ async function loadReviews(reset) {
     state.offset = 0;
     $('#review-now').innerHTML = skeletonCards(3);
     $('#review-next').innerHTML = skeletonCards(3);
+    $('#review-done').innerHTML = skeletonCards(3);
     $('#load-more').hidden = true;
     $('#review-count').textContent = 'Loading…';
   }
@@ -503,6 +519,7 @@ async function loadReviews(reset) {
     state.reviews = reset ? incoming : state.reviews.concat(incoming);
     state.total = Number(data.total) || 0;
     state.counts = data.counts && typeof data.counts === 'object' ? data.counts : {};
+    state.stateCounts = data.state_counts && typeof data.state_counts === 'object' ? data.state_counts : {};
     state.offset = state.reviews.length;
     renderReviews();
   } catch (error) {
@@ -510,6 +527,7 @@ async function loadReviews(reset) {
       const copy = `<div class="queue-empty"><strong>Could not load reviews</strong><span>${esc(error.message)}</span></div>`;
       $('#review-now').innerHTML = copy;
       $('#review-next').innerHTML = '';
+      $('#review-done').innerHTML = '';
       toast(error.message);
     }
   } finally {
@@ -988,7 +1006,13 @@ function renderReviewDetail(review, findings) {
     review.context_chars
       ? `<span class="detail-chip">${num(review.context_chars)} context chars</span>`
       : '',
-    review.merged ? '<span class="detail-chip">Merged automatically</span>' : '',
+    review.merged
+      ? '<span class="detail-chip">Merged automatically</span>'
+      : review.state === 'merged'
+        ? '<span class="detail-chip">Merged</span>'
+        : review.state === 'closed'
+          ? '<span class="detail-chip">Closed</span>'
+          : '',
   ].filter(Boolean).join('');
 
   const list = findings.length

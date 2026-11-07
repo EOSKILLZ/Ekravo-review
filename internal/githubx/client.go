@@ -387,6 +387,7 @@ type PullRequest struct {
 	Title          string `json:"title"`
 	Body           string `json:"body"`
 	State          string `json:"state"`
+	Merged         bool   `json:"merged"`
 	Draft          bool   `json:"draft"`
 	Mergeable      *bool  `json:"mergeable"`
 	MergeableState string `json:"mergeable_state"`

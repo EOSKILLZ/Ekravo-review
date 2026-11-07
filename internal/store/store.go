@@ -38,6 +38,7 @@ type Review struct {
 	Additions        int       `json:"additions"`
 	Deletions        int       `json:"deletions"`
 	Merged           bool      `json:"merged"`
+	State            string    `json:"state"`
 	CreatedAt        time.Time `json:"created_at"`
 }
 
@@ -93,6 +94,7 @@ CREATE TABLE IF NOT EXISTS reviews (
 	additions     INTEGER NOT NULL DEFAULT 0,
 	deletions     INTEGER NOT NULL DEFAULT 0,
 	merged        INTEGER NOT NULL DEFAULT 0,
+	state         TEXT    NOT NULL DEFAULT '',
 	prompt_tokens     INTEGER NOT NULL DEFAULT 0,
 	completion_tokens INTEGER NOT NULL DEFAULT 0,
 	context_files     INTEGER NOT NULL DEFAULT 0,
@@ -144,6 +146,7 @@ CREATE TABLE IF NOT EXISTS settings (
 		{"additions", "INTEGER NOT NULL DEFAULT 0"},
 		{"deletions", "INTEGER NOT NULL DEFAULT 0"},
 		{"merged", "INTEGER NOT NULL DEFAULT 0"},
+		{"state", "TEXT NOT NULL DEFAULT ''"},
 		{"prompt_tokens", "INTEGER NOT NULL DEFAULT 0"},
 		{"completion_tokens", "INTEGER NOT NULL DEFAULT 0"},
 		{"context_files", "INTEGER NOT NULL DEFAULT 0"},
@@ -178,9 +181,9 @@ func (s *Store) SaveReview(ctx context.Context, r *Review) error {
 	}
 	_, err := s.db.ExecContext(ctx, `
 INSERT INTO reviews (repo, pr, title, url, head_sha, review_id, verdict, findings,
-	findings_json, model, duration_ms, files, additions, deletions, merged,
+	findings_json, model, duration_ms, files, additions, deletions, merged, state,
 	prompt_tokens, completion_tokens, context_files, context_chars, context_ms, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(repo, pr, head_sha) DO UPDATE SET
 	title         = excluded.title,
 	url           = excluded.url,
@@ -194,6 +197,7 @@ ON CONFLICT(repo, pr, head_sha) DO UPDATE SET
 	additions     = excluded.additions,
 	deletions     = excluded.deletions,
 	merged        = CASE WHEN excluded.merged = 1 THEN 1 ELSE reviews.merged END,
+	state         = CASE WHEN reviews.state IN ('merged', 'closed') THEN reviews.state ELSE excluded.state END,
 	prompt_tokens     = excluded.prompt_tokens,
 	completion_tokens = excluded.completion_tokens,
 	context_files     = excluded.context_files,
@@ -202,7 +206,7 @@ ON CONFLICT(repo, pr, head_sha) DO UPDATE SET
 	created_at    = excluded.created_at`,
 		r.Repo, r.PR, r.Title, r.URL, r.HeadSHA, r.ReviewID, r.Verdict, r.Findings,
 		r.FindingsJSON, r.Model, r.DurationMS, r.Files, r.Additions, r.Deletions,
-		merged, r.PromptTokens, r.CompletionTokens, r.ContextFiles, r.ContextChars,
+		merged, r.State, r.PromptTokens, r.CompletionTokens, r.ContextFiles, r.ContextChars,
 		r.ContextMS, r.CreatedAt.Format(time.RFC3339))
 	if err != nil {
 		return fmt.Errorf("save review: %w", err)
@@ -213,12 +217,59 @@ ON CONFLICT(repo, pr, head_sha) DO UPDATE SET
 // MarkMerged records that the reviewed commit was merged.
 func (s *Store) MarkMerged(ctx context.Context, repo string, pr int, sha string) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE reviews SET merged = 1 WHERE repo = ? AND pr = ? AND head_sha = ?`,
+		`UPDATE reviews SET merged = 1, state = 'merged' WHERE repo = ? AND pr = ? AND head_sha = ?`,
 		repo, pr, sha)
 	if err != nil {
 		return fmt.Errorf("mark merged: %w", err)
 	}
 	return nil
+}
+
+// SetPRState records the GitHub state of a pull request on every review row for
+// it. "merged" and "closed" move the review out of the active review queue.
+func (s *Store) SetPRState(ctx context.Context, repo string, pr int, state string) error {
+	switch state {
+	case "open", "merged", "closed":
+	default:
+		return fmt.Errorf("invalid PR state %q", state)
+	}
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE reviews SET state = ? WHERE repo = ? AND pr = ?`, state, repo, pr)
+	if err != nil {
+		return fmt.Errorf("set PR state: %w", err)
+	}
+	return nil
+}
+
+// PRRef identifies a pull request that has been reviewed at least once.
+type PRRef struct {
+	Repo string `json:"repo"`
+	PR   int    `json:"pr"`
+}
+
+// UnknownPRStates lists reviewed PRs whose state predates state tracking,
+// newest first. The app reconciles them against GitHub after an upgrade.
+func (s *Store) UnknownPRStates(ctx context.Context, limit int) ([]PRRef, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT repo, pr FROM reviews WHERE state = '' GROUP BY repo, pr ORDER BY MAX(id) DESC LIMIT ?`,
+		limit)
+	if err != nil {
+		return nil, fmt.Errorf("unknown PR states: %w", err)
+	}
+	defer rows.Close()
+
+	var out []PRRef
+	for rows.Next() {
+		var ref PRRef
+		if err := rows.Scan(&ref.Repo, &ref.PR); err != nil {
+			return nil, fmt.Errorf("unknown PR states: %w", err)
+		}
+		out = append(out, ref)
+	}
+	return out, rows.Err()
 }
 
 // IsReviewed reports whether this exact commit was already handled.
@@ -237,7 +288,7 @@ func (s *Store) IsReviewed(ctx context.Context, repo string, pr int, sha string)
 }
 
 const reviewColumns = `id, repo, pr, title, url, head_sha, review_id, verdict, findings,
-	findings_json, model, duration_ms, files, additions, deletions, merged,
+	findings_json, model, duration_ms, files, additions, deletions, merged, state,
 	prompt_tokens, completion_tokens, context_files, context_chars, context_ms, created_at`
 
 type scanner interface {
@@ -250,7 +301,7 @@ func scanReview(row scanner) (*Review, error) {
 	var merged int
 	if err := row.Scan(&r.ID, &r.Repo, &r.PR, &r.Title, &r.URL, &r.HeadSHA, &r.ReviewID,
 		&r.Verdict, &r.Findings, &r.FindingsJSON, &r.Model, &r.DurationMS,
-		&r.Files, &r.Additions, &r.Deletions, &merged,
+		&r.Files, &r.Additions, &r.Deletions, &merged, &r.State,
 		&r.PromptTokens, &r.CompletionTokens, &r.ContextFiles, &r.ContextChars,
 		&r.ContextMS, &createdAt); err != nil {
 		return nil, err
@@ -375,6 +426,66 @@ func (s *Store) ReviewCounts(ctx context.Context, query string) (map[string]int,
 			return nil, fmt.Errorf("count reviews by verdict: %w", err)
 		}
 		out[verdict] = count
+	}
+	return out, rows.Err()
+}
+
+// ActiveReviewCounts groups reviews that are still live by verdict. Merged and
+// closed pull requests are excluded so Now/Next totals stay actionable.
+func (s *Store) ActiveReviewCounts(ctx context.Context, query string) (map[string]int, error) {
+	where := "state NOT IN ('merged', 'closed')"
+	args := []any{}
+	if q := strings.TrimSpace(query); q != "" {
+		like := "%" + q + "%"
+		where += " AND (repo LIKE ? OR title LIKE ? OR CAST(pr AS TEXT) LIKE ?)"
+		args = append(args, like, like, like)
+	}
+
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT verdict, COUNT(*) FROM reviews WHERE `+where+` GROUP BY verdict`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("count active reviews by verdict: %w", err)
+	}
+	defer rows.Close()
+
+	out := map[string]int{}
+	for rows.Next() {
+		var verdict string
+		var count int
+		if err := rows.Scan(&verdict, &count); err != nil {
+			return nil, fmt.Errorf("count active reviews by verdict: %w", err)
+		}
+		out[verdict] = count
+	}
+	return out, rows.Err()
+}
+
+// ReviewStateCounts groups every matching review by PR state. The dashboard
+// uses it to total the Done column independently of pagination.
+func (s *Store) ReviewStateCounts(ctx context.Context, query string) (map[string]int, error) {
+	where := "1=1"
+	args := []any{}
+	if q := strings.TrimSpace(query); q != "" {
+		like := "%" + q + "%"
+		where = "(repo LIKE ? OR title LIKE ? OR CAST(pr AS TEXT) LIKE ?)"
+		args = append(args, like, like, like)
+	}
+
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT state, COUNT(*) FROM reviews WHERE `+where+` GROUP BY state`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("count reviews by state: %w", err)
+	}
+	defer rows.Close()
+
+	out := map[string]int{}
+	for rows.Next() {
+		var state string
+		var count int
+		if err := rows.Scan(&state, &count); err != nil {
+			return nil, fmt.Errorf("count reviews by state: %w", err)
+		}
+		out[state] = count
 	}
 	return out, rows.Err()
 }
