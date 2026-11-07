@@ -18,6 +18,8 @@ const state = {
   reposLoaded: false,
   repoStats: [],
   available: [],
+  repoQuery: '',
+  repoFilter: 'all',
   watch: { all: true, repos: [] },
   lastFocus: null,
 };
@@ -449,13 +451,19 @@ function renderReviewList() {
   movePill();
 }
 
-function movePill() {
-  const seg = $('#verdict-filter');
+function movePill(selector = '#verdict-filter') {
+  const seg = $(selector);
+  if (!seg) return;
   const active = seg.querySelector('.seg-btn.is-active');
   const pill = seg.querySelector('.seg-pill');
   if (!active || !pill) return;
   pill.style.width = `${active.offsetWidth}px`;
   pill.style.transform = `translateX(${active.offsetLeft}px)`;
+}
+
+function moveActivePill() {
+  if (state.view === 'repos') movePill('#repo-filter');
+  else if (state.view === 'reviews') movePill('#verdict-filter');
 }
 
 /* ── repositories ──────────────────────────────────────────────────────── */
@@ -465,13 +473,21 @@ function isWatched(repo) {
   return state.watch.repos.some((entry) => entry.toLowerCase() === repo.toLowerCase());
 }
 
+// repoBars draws review density from the real counts. No filler segments, so a
+// repository with no reviews gets a flat, visibly empty track.
 function repoBars(findings, reviews) {
-  const filled = Math.min(10, Math.max(1, Math.round(findings / Math.max(1, reviews) * 2)));
-  return Array.from({ length: 14 }, (_, i) => {
-    if (i < filled) return '<span class="on"></span>';
-    if (i < filled + 2) return '<span class="warm"></span>';
-    return '<span></span>';
+  const slots = 14;
+  if (!reviews) {
+    return { empty: true, label: 'No reviews yet', html: Array.from({ length: slots }, () => '<span></span>').join('') };
+  }
+  const density = findings / reviews;
+  const filled = Math.min(slots, Math.round(density * 2));
+  const hot = density >= 4;
+  const html = Array.from({ length: slots }, (_, i) => {
+    if (i >= filled) return '<span></span>';
+    return hot ? '<span class="warm"></span>' : '<span class="on"></span>';
   }).join('');
+  return { empty: filled === 0, label: `${density.toFixed(1)} findings / review`, html };
 }
 
 // repoList merges review stats with the repositories the bot can actually
@@ -516,6 +532,11 @@ function paintWatchState() {
     const repo = card.dataset.repo;
     const on = isWatched(repo);
     card.classList.toggle('is-paused', !on);
+    const label = card.querySelector('.repo-state');
+    if (label) {
+      label.textContent = on ? 'Watching' : 'Paused';
+      label.classList.toggle('is-on', on);
+    }
     const toggle = card.querySelector('.repo-toggle');
     if (!toggle) return;
     toggle.classList.toggle('is-on', on);
@@ -527,31 +548,63 @@ function paintWatchState() {
 
 function renderRepos() {
   const host = $('#repo-grid');
-  const list = repoList();
-  if (!list.length) {
+  const all = repoList();
+  const query = state.repoQuery.trim().toLowerCase();
+  const list = all.filter((repo) => {
+    if (query && !repo.repo.toLowerCase().includes(query)) return false;
+    if (state.repoFilter === 'watched') return isWatched(repo.repo);
+    if (state.repoFilter === 'paused') return !isWatched(repo.repo);
+    if (state.repoFilter === 'new') return repo.reviewed === false;
+    return true;
+  });
+
+  const count = $('#repo-count');
+  if (count) {
+    count.textContent = !all.length
+      ? 'No repositories'
+      : list.length === all.length
+        ? `${num(all.length)} repositor${all.length === 1 ? 'y' : 'ies'}`
+        : `${num(list.length)} of ${num(all.length)} repositories`;
+  }
+
+  if (!all.length) {
     host.innerHTML = emptyState('No repositories yet', 'Install the GitHub App on repositories and they appear here, reviewed or not.');
     paintWatchState();
+    return;
+  }
+
+  if (!list.length) {
+    host.innerHTML = emptyState('Nothing matches', 'Clear the search or pick another filter.');
+    paintWatchState();
+    requestAnimationFrame(() => movePill('#repo-filter'));
     return;
   }
 
   host.innerHTML = list.map((repo) => {
     const watched = isWatched(repo.repo);
     const reviewed = repo.reviewed !== false;
+    const meter = repoBars(repo.findings, repo.reviews);
     const chip = reviewed
       ? `<span class="verdict ${verdictClass(repo.last_verdict)}">${esc(verdictLabel(repo.last_verdict))}</span>`
       : '<span class="chip">Not reviewed</span>';
     return `<article class="repo-card ${watched ? 'is-watched' : 'is-paused'}" data-repo="${esc(repo.repo)}">
       <div class="repo-top">
-        <span class="repo-name">${esc(repo.repo)}</span>
+        <span class="repo-name" title="${esc(repo.repo)}">${esc(repo.repo)}</span>
+      </div>
+      <div class="repo-sub">
         ${chip}
+        <span class="repo-time">${reviewed ? `Last review ${relativeTime(repo.last_review_at)}` : 'No pull requests yet'}</span>
       </div>
       <div class="repo-nums">
         <div><strong>${num(repo.reviews)}</strong><span>Reviews</span></div>
         <div><strong>${num(repo.findings)}</strong><span>Findings</span></div>
       </div>
-      <div class="bars" aria-hidden="true">${repoBars(repo.findings, repo.reviews)}</div>
+      <div class="repo-meter">
+        <div class="bars ${meter.empty ? 'is-empty' : ''}" aria-hidden="true">${meter.html}</div>
+        <span class="meter-label">${meter.label}</span>
+      </div>
       <div class="repo-foot">
-        <span class="repo-time">${reviewed ? `Last review ${relativeTime(repo.last_review_at)}` : 'No reviews yet'}</span>
+        <span class="repo-state ${watched ? 'is-on' : ''}">${watched ? 'Watching' : 'Paused'}</span>
         <button class="switch repo-toggle ${watched ? 'is-on' : ''}" role="switch" data-repo="${esc(repo.repo)}"
           aria-checked="${watched}" aria-label="Watch ${esc(repo.repo)}" ${state.watch.all ? 'disabled' : ''}>
           <span class="knob"></span>
@@ -561,6 +614,7 @@ function renderRepos() {
   }).join('');
 
   paintWatchState();
+  requestAnimationFrame(() => movePill('#repo-filter'));
 }
 
 async function loadRepos() {
@@ -594,7 +648,8 @@ async function saveWatch(patch) {
   try {
     const data = await api('/api/watch', { method: 'PUT', body });
     state.watch = { all: !!data.all, repos: Array.isArray(data.repos) ? data.repos : [] };
-    paintWatchState();
+    if (state.repoFilter === 'watched' || state.repoFilter === 'paused') renderRepos();
+    else paintWatchState();
     toast(state.watch.all
       ? 'Watching every repository'
       : state.watch.repos.length
@@ -1141,7 +1196,7 @@ function bind() {
 
   bindSearch();
   bindMenu();
-  window.addEventListener('resize', () => { if (state.view === 'reviews') movePill(); });
+  window.addEventListener('resize', moveActivePill);
 
   $('#see-all').addEventListener('click', () => { window.location.hash = '#/reviews'; });
 
@@ -1179,6 +1234,31 @@ function bind() {
   $('#gate-form').addEventListener('submit', submitGate);
 
   $('#watch-all').addEventListener('click', () => saveWatch({ all: !state.watch.all }));
+
+  const repoSearch = $('#repo-search');
+  repoSearch.addEventListener('input', () => {
+    state.repoQuery = repoSearch.value;
+    $('#repo-search-clear').hidden = !repoSearch.value;
+    renderRepos();
+  });
+  $('#repo-search-clear').addEventListener('click', () => {
+    repoSearch.value = '';
+    state.repoQuery = '';
+    $('#repo-search-clear').hidden = true;
+    renderRepos();
+    repoSearch.focus();
+  });
+  $$('#repo-filter .seg-btn').forEach((el) => {
+    el.addEventListener('click', () => {
+      state.repoFilter = el.dataset.repoFilter || 'all';
+      $$('#repo-filter .seg-btn').forEach((b) => {
+        b.classList.toggle('is-active', b === el);
+        b.setAttribute('aria-selected', String(b === el));
+      });
+      renderRepos();
+      movePill('#repo-filter');
+    });
+  });
   $('#repo-grid').addEventListener('click', (event) => {
     const toggle = event.target.closest('.repo-toggle');
     if (!toggle || toggle.disabled) return;
@@ -1192,16 +1272,21 @@ function bind() {
 
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && $('#drawer').classList.contains('is-open')) closeDrawer();
-    if (event.key === '/' && document.activeElement !== $('#search') && state.view === 'reviews') {
-      event.preventDefault();
-      $('#search').focus();
+    if (event.key === '/' && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
+      if (state.view === 'reviews') {
+        event.preventDefault();
+        $('#search').focus();
+      } else if (state.view === 'repos') {
+        event.preventDefault();
+        $('#repo-search').focus();
+      }
     }
   });
 
   let resizeTimer;
   window.addEventListener('resize', () => {
     clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(() => { if (state.view === 'reviews') movePill(); }, 120);
+    resizeTimer = setTimeout(moveActivePill, 120);
   });
 }
 

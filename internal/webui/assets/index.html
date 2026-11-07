@@ -211,6 +211,27 @@
           </button>
         </div>
       </div>
+      <div class="toolbar">
+        <div class="seg" id="repo-filter" role="tablist" aria-label="Filter repositories">
+          <span class="seg-pill" aria-hidden="true"></span>
+          <button class="seg-btn is-active" role="tab" aria-selected="true" data-repo-filter="all">All</button>
+          <button class="seg-btn" role="tab" aria-selected="false" data-repo-filter="watched">Watched</button>
+          <button class="seg-btn" role="tab" aria-selected="false" data-repo-filter="paused">Paused</button>
+          <button class="seg-btn" role="tab" aria-selected="false" data-repo-filter="new">No reviews</button>
+        </div>
+
+        <div class="search">
+          <svg class="search-icon"><use href="#i-search"/></svg>
+          <input id="repo-search" type="text" placeholder="Search repositories" aria-label="Search repositories" autocomplete="off" spellcheck="false">
+          <button class="search-clear" id="repo-search-clear" aria-label="Clear repository search" hidden><svg><use href="#i-x"/></svg></button>
+        </div>
+      </div>
+
+      <div class="list-meta">
+        <span id="repo-count">—</span>
+        <span class="list-hint">Flip a switch to include a repository</span>
+      </div>
+
       <div class="repo-grid" id="repo-grid" aria-live="polite"></div>
     </section>
 
