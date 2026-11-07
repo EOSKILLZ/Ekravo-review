@@ -19,7 +19,7 @@ API key.
 
 Dashboard: http://localhost:8090
 
-The Repositories page lists every repository the GitHub App installation can
+The Repositories page lists every repository your GitHub App installations can
 reach, reviewed or not. Only watched repositories get reviewed: leave *Watch all
 repositories* on, or switch it off and pick repositories one by one. The search
 box and the All / Watched / Paused / No reviews filters only narrow the view.
