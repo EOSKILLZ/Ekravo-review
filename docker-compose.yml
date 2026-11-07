@@ -16,5 +16,5 @@ services:
       - "${WEBHOOK_PORT:-8090}:8090"
     volumes:
       - ./data:/data
-      # GitHub App private key (optional):
-      # - ./your-app.pem:/data/your-app.pem:ro
+      # Optional: GitHub App private keys and other secrets.
+      - ./secrets:/data/secrets:ro
