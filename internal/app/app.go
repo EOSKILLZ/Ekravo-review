@@ -111,10 +111,18 @@ func (a *App) Run(ctx context.Context) error {
 	a.pool.Start(ctx)
 
 	srv := server.New(a.cfg, a.log, a.metrics, server.Handlers{
-		OnPullRequest: func(_ context.Context, repo string, number int, _ string, _ bool) {
+		OnPullRequest: func(ctx context.Context, repo string, number int, _ string, _ bool) {
+			if !a.watching(ctx, repo) {
+				a.log.Debug("ignoring pull request from unwatched repository", "repo", repo, "pr", number)
+				return
+			}
 			a.enqueuePR(repo, number, false)
 		},
-		OnCommand: func(_ context.Context, repo string, number int, command string) {
+		OnCommand: func(ctx context.Context, repo string, number int, command string) {
+			if !a.watching(ctx, repo) {
+				a.log.Debug("ignoring command from unwatched repository", "repo", repo, "pr", number)
+				return
+			}
 			a.enqueueCommand(repo, number, command)
 		},
 		Ready: func(ctx context.Context) error { return a.st.Ping(ctx) },
@@ -139,6 +147,13 @@ func (a *App) Run(ctx context.Context) error {
 				a.enqueueCommand(repo, number, command)
 			},
 		)
+		p.SetWatch(func(ctx context.Context) (bool, []string, error) {
+			watch, err := a.st.Watch(ctx)
+			if err != nil {
+				return false, nil, err
+			}
+			return watch.All, watch.Repos, nil
+		})
 		done := make(chan struct{})
 		go func() {
 			p.Run(ctx)
@@ -165,6 +180,25 @@ func (a *App) Run(ctx context.Context) error {
 
 // Metrics exposes counters (used by tests and operators).
 func (a *App) Metrics() *server.Metrics { return a.metrics }
+
+// watching reports whether a repository is in the dashboard watch list. An
+// unreadable setting fails open so a storage hiccup cannot stop reviews.
+func (a *App) watching(ctx context.Context, repo string) bool {
+	watch, err := a.st.Watch(ctx)
+	if err != nil {
+		a.log.Warn("could not read watch list; allowing review", "repo", repo, "err", err)
+		return true
+	}
+	if watch.All {
+		return true
+	}
+	for _, watched := range watch.Repos {
+		if strings.EqualFold(watched, repo) {
+			return true
+		}
+	}
+	return false
+}
 
 func (a *App) enqueuePR(repo string, number int, force bool) {
 	key := fmt.Sprintf("%s#%d", repo, number)

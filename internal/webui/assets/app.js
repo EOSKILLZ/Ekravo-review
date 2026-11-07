@@ -16,6 +16,8 @@ const state = {
   loading: false,
   reviewsLoaded: false,
   reposLoaded: false,
+  repoStats: [],
+  watch: { all: true, repos: [] },
   lastFocus: null,
 };
 
@@ -173,19 +175,20 @@ function renderRuntime() {
 function renderOverview(data, silent) {
   const totals = data.totals || {};
   const reviews = totals.reviews || 0;
+  const rate = reviews ? Math.round((totals.approve || 0) / reviews * 100) : 0;
 
   if (silent) {
     $('#stat-reviews').textContent = num(reviews);
-    $('#stat-approve').textContent = reviews ? `${Math.round((totals.approve || 0) / reviews * 100)}%` : '0%';
+    $('#stat-approve').textContent = `${rate}%`;
     $('#stat-findings').textContent = num(totals.findings);
     $('#stat-merged').textContent = num(totals.merged);
   } else {
     animateNumber($('#stat-reviews'), reviews);
-    const rate = reviews ? Math.round((totals.approve || 0) / reviews * 100) : 0;
     animateNumber($('#stat-approve'), rate, '%');
     animateNumber($('#stat-findings'), totals.findings);
     animateNumber($('#stat-merged'), totals.merged);
   }
+  setRing(rate);
 
   $('#pulse-window').textContent = `Last ${state.days} days`;
   $('#stat-reviews-sub').textContent = reviews
@@ -198,8 +201,16 @@ function renderOverview(data, silent) {
   $('#stat-merged-sub').textContent = `${num(totals.repos)} repositories tracked`;
 
   renderSpark(state.series);
+  renderFindingBars(state.series);
   renderChart(state.series);
   renderRecent(data.recent || []);
+}
+
+function setRing(rate) {
+  const ring = $('#approve-ring');
+  if (!ring) return;
+  const clamped = Math.max(0, Math.min(100, rate));
+  ring.style.strokeDashoffset = String(100 - clamped);
 }
 
 function renderSpark(series) {
@@ -208,15 +219,25 @@ function renderSpark(series) {
     host.innerHTML = '';
     return;
   }
-  const width = 120;
-  const height = 60;
-  const max = Math.max(1, ...series.map((d) => d.reviews));
-  const step = width / Math.max(1, series.length - 1);
-  const points = series.map((d, i) => [i * step, height - (d.reviews / max) * (height - 8) - 4]);
-  const line = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(' ');
-  host.innerHTML = `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" aria-hidden="true">
-    <path d="${line}" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round"/>
-  </svg>`;
+  const window_ = series.slice(-24);
+  const max = Math.max(1, ...window_.map((d) => d.reviews));
+  host.innerHTML = `<div class="spark-bars">${window_.map((d, i) => `
+    <span class="${d.reviews ? 'on' : ''}" style="--h:${Math.max(8, Math.round((d.reviews / max) * 100))}%;--d:${i * 26}ms"></span>`).join('')}</div>`;
+}
+
+function renderFindingBars(series) {
+  const host = $('#finding-bars');
+  if (!host) return;
+  if (!series.length) {
+    host.innerHTML = '';
+    return;
+  }
+  const window_ = series.slice(-28);
+  const max = Math.max(1, ...window_.map((d) => d.findings));
+  host.innerHTML = window_.map((d, i) => {
+    const height = Math.max(6, Math.round((d.findings / max) * 100));
+    return `<span style="--h:${height}%;--o:${d.findings ? 1 : .22};--d:${i * 22}ms"></span>`;
+  }).join('');
 }
 
 function smoothPath(points) {
@@ -301,6 +322,7 @@ function renderChart(series) {
       <path class="chart-area" d="${area}"/>
       <path class="chart-line" d="${line}" pathLength="1"/>
       <line class="chart-cursor" x1="${L}" y1="${T}" x2="${L}" y2="${T + plotH}"/>
+      <circle class="chart-halo" cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="4"/>
       <circle class="chart-dot" cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="3.4"/>
       ${xLabels}
     </svg>
@@ -437,42 +459,126 @@ function movePill() {
 
 /* ── repositories ──────────────────────────────────────────────────────── */
 
+function isWatched(repo) {
+  if (state.watch.all) return true;
+  return state.watch.repos.some((entry) => entry.toLowerCase() === repo.toLowerCase());
+}
+
+function repoBars(findings, reviews) {
+  const filled = Math.min(10, Math.max(1, Math.round(findings / Math.max(1, reviews) * 2)));
+  return Array.from({ length: 14 }, (_, i) => {
+    if (i < filled) return '<span class="on"></span>';
+    if (i < filled + 2) return '<span class="warm"></span>';
+    return '<span></span>';
+  }).join('');
+}
+
+function paintWatchState() {
+  const known = state.repoStats.length;
+  const all = state.watch.all;
+  const watched = state.repoStats.filter((repo) => isWatched(repo.repo)).length;
+
+  const allBtn = $('#watch-all');
+  if (allBtn) {
+    allBtn.classList.toggle('is-on', all);
+    allBtn.setAttribute('aria-checked', String(all));
+  }
+
+  const count = $('#watch-count');
+  if (count) {
+    count.textContent = !known
+      ? 'No repositories yet'
+      : all
+        ? `Watching all ${known} repositor${known === 1 ? 'y' : 'ies'}`
+        : `${watched} of ${known} watched`;
+  }
+
+  $$('.repo-card').forEach((card) => {
+    const repo = card.dataset.repo;
+    const on = isWatched(repo);
+    card.classList.toggle('is-paused', !on);
+    const toggle = card.querySelector('.repo-toggle');
+    if (!toggle) return;
+    toggle.classList.toggle('is-on', on);
+    toggle.setAttribute('aria-checked', String(on));
+    toggle.disabled = all;
+    toggle.title = all ? 'Every repository is watched' : on ? 'Stop watching this repository' : 'Watch this repository';
+  });
+}
+
+function renderRepos() {
+  const host = $('#repo-grid');
+  if (!state.repoStats.length) {
+    host.innerHTML = emptyState('No repositories', 'Once the bot reviews a pull request, its repository appears here.');
+    paintWatchState();
+    return;
+  }
+
+  host.innerHTML = state.repoStats.map((repo) => {
+    const watched = isWatched(repo.repo);
+    return `<article class="repo-card ${watched ? 'is-watched' : 'is-paused'}" data-repo="${esc(repo.repo)}">
+      <div class="repo-top">
+        <span class="repo-name">${esc(repo.repo)}</span>
+        <span class="verdict ${verdictClass(repo.last_verdict)}">${esc(verdictLabel(repo.last_verdict))}</span>
+      </div>
+      <div class="repo-nums">
+        <div><strong>${num(repo.reviews)}</strong><span>Reviews</span></div>
+        <div><strong>${num(repo.findings)}</strong><span>Findings</span></div>
+      </div>
+      <div class="bars" aria-hidden="true">${repoBars(repo.findings, repo.reviews)}</div>
+      <div class="repo-foot">
+        <span class="repo-time">Last review ${relativeTime(repo.last_review_at)}</span>
+        <button class="switch repo-toggle ${watched ? 'is-on' : ''}" role="switch" data-repo="${esc(repo.repo)}"
+          aria-checked="${watched}" aria-label="Watch ${esc(repo.repo)}" ${state.watch.all ? 'disabled' : ''}>
+          <span class="knob"></span>
+        </button>
+      </div>
+    </article>`;
+  }).join('');
+
+  paintWatchState();
+}
+
 async function loadRepos() {
   const host = $('#repo-grid');
   host.innerHTML = '<div class="skeleton-block"></div><div class="skeleton-block"></div><div class="skeleton-block"></div>';
   try {
     const data = await api('/api/repos');
-    const repos = Array.isArray(data.repos) ? data.repos : [];
-    if (!repos.length) {
-      host.innerHTML = emptyState('No repositories', 'Once the bot reviews a pull request, its repository appears here.');
-      return;
-    }
-    host.innerHTML = repos.map((repo) => {
-      const filled = Math.min(10, Math.max(1, Math.round(repo.findings / Math.max(1, repo.reviews) * 2)));
-      const bars = Array.from({ length: 14 }, (_, i) => {
-        if (i < filled) return '<span class="on"></span>';
-        if (i < filled + 2) return '<span class="warm"></span>';
-        return '<span></span>';
-      }).join('');
-
-      return `<article class="repo-card">
-        <div class="repo-top">
-          <span class="repo-name">${esc(repo.repo)}</span>
-          <span class="verdict ${verdictClass(repo.last_verdict)}">${esc(verdictLabel(repo.last_verdict))}</span>
-        </div>
-        <div class="repo-nums">
-          <div><strong>${num(repo.reviews)}</strong><span>Reviews</span></div>
-          <div><strong>${num(repo.findings)}</strong><span>Findings</span></div>
-        </div>
-        <div class="bars" aria-hidden="true">${bars}</div>
-        <span class="repo-time">Last review ${relativeTime(repo.last_review_at)}</span>
-      </article>`;
-    }).join('');
+    state.repoStats = Array.isArray(data.repos) ? data.repos : [];
+    const watch = data.watch || {};
+    state.watch = {
+      all: watch.all !== false,
+      repos: Array.isArray(watch.repos) ? watch.repos : [],
+    };
+    renderRepos();
   } catch (error) {
     if (error.message !== 'Unauthorized') {
       host.innerHTML = emptyState('Could not load repositories', error.message);
       toast(error.message);
     }
+  }
+}
+
+async function saveWatch(patch) {
+  const body = {
+    all: patch.all === undefined ? state.watch.all : patch.all,
+    repos: patch.repos === undefined ? state.watch.repos : patch.repos,
+  };
+  const allBtn = $('#watch-all');
+  if (allBtn) allBtn.disabled = true;
+  try {
+    const data = await api('/api/watch', { method: 'PUT', body });
+    state.watch = { all: !!data.all, repos: Array.isArray(data.repos) ? data.repos : [] };
+    paintWatchState();
+    toast(state.watch.all
+      ? 'Watching every repository'
+      : state.watch.repos.length
+        ? `Watching ${state.watch.repos.length} repositor${state.watch.repos.length === 1 ? 'y' : 'ies'}`
+        : 'All repositories paused');
+  } catch (error) {
+    if (error.message !== 'Unauthorized') toast(error.message);
+  } finally {
+    if (allBtn) allBtn.disabled = false;
   }
 }
 
@@ -497,14 +603,13 @@ function renderSettings() {
 
   const rows = [
     ['Mode', rt.mode === 'webhook' ? 'Webhook deliveries' : 'Polling'],
-    ['Model chain', (rt.models || []).join(' → ') || '—'],
-    ['Bot handle', `@${rt.handle}`],
+    ['Models', (rt.models || []).join(' → ') || '—'],
+    ['Handle', `@${rt.handle}`],
     ['Workers', String(rt.workers)],
-    ['Files per review', String(rt.max_files)],
-    ['Chunk budget', `${num(rt.chunk_chars)} chars`],
-    ['Repository context', `${rt.context_mode || 'off'} · ${rt.context_fetch || 'auto'}`],
-    ['Context budget', `${num(rt.context_max_chars)} / ${num(rt.context_max_total_chars)} chars`],
   ];
+  if (rt.context_mode && rt.context_mode !== 'off') {
+    rows.push(['Repository context', `${rt.context_mode} · ${rt.context_fetch || 'auto'}`]);
+  }
 
   $('#runtime-rows').innerHTML = rows.map(([label, value]) => `
     <div class="setting-row">
@@ -536,18 +641,6 @@ function renderSettings() {
       toast(`Set ${env}=${next} in .env, then restart.`);
     });
   });
-
-  $('#env-snippet').textContent = [
-    '# .env — the switches that matter',
-    `AUTO_APPROVE=${rt.auto_approve}`,
-    `AUTO_MERGE=${rt.auto_merge}`,
-    `AUTO_MERGE_METHOD=${rt.auto_merge_method}`,
-    `WEB_RESEARCH=${rt.web_research}`,
-    `WEB_RESEARCH_MAX_QUERIES=${rt.web_research_max_queries}`,
-    `LLM_MODELS=${(rt.models || []).join(',')}`,
-    `CONTEXT_MODE=${rt.context_mode || 'off'}`,
-    `CONTEXT_FETCH=${rt.context_fetch || 'auto'}`,
-  ].join('\n');
 
   $('#security-notice').hidden = Boolean(rt.dashboard_auth);
 }
@@ -940,7 +1033,62 @@ function bindMenu() {
   });
 }
 
+function bindAtmosphere() {
+  const spot = $('#spot');
+  if (!spot) return;
+  const fine = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+  if (!fine || reducedMotion()) {
+    spot.style.display = 'none';
+    return;
+  }
+
+  let targetX = window.innerWidth * .5;
+  let targetY = window.innerHeight * .3;
+  let x = targetX;
+  let y = targetY;
+  let frame = 0;
+
+  const loop = () => {
+    x += (targetX - x) * .07;
+    y += (targetY - y) * .07;
+    spot.style.transform = `translate3d(${x - 310}px, ${y - 310}px, 0)`;
+    if (Math.abs(targetX - x) > .4 || Math.abs(targetY - y) > .4) {
+      frame = requestAnimationFrame(loop);
+    } else {
+      frame = 0;
+    }
+  };
+
+  window.addEventListener('pointermove', (event) => {
+    targetX = event.clientX;
+    targetY = event.clientY;
+    if (!frame) frame = requestAnimationFrame(loop);
+  }, { passive: true });
+}
+
+function bindGlare() {
+  if (reducedMotion()) return;
+  let frame = 0;
+  let last = null;
+
+  document.addEventListener('pointermove', (event) => {
+    last = event;
+    if (frame) return;
+    frame = requestAnimationFrame(() => {
+      frame = 0;
+      const el = last.target.closest ? last.target.closest('.card, .repo-card') : null;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      el.style.setProperty('--cx', `${last.clientX - rect.left}px`);
+      el.style.setProperty('--cy', `${last.clientY - rect.top}px`);
+    });
+  }, { passive: true });
+}
+
 function bind() {
+  bindAtmosphere();
+  bindGlare();
+
   $$('.nav-item').forEach((el) => {
     el.addEventListener('click', () => {
       window.location.hash = `#/${el.dataset.view}`;
@@ -1002,13 +1150,16 @@ function bind() {
 
   $('#gate-form').addEventListener('submit', submitGate);
 
-  $('#copy-env').addEventListener('click', async () => {
-    try {
-      await navigator.clipboard.writeText($('#env-snippet').textContent);
-      toast('Config copied');
-    } catch {
-      toast('Could not access the clipboard');
-    }
+  $('#watch-all').addEventListener('click', () => saveWatch({ all: !state.watch.all }));
+  $('#repo-grid').addEventListener('click', (event) => {
+    const toggle = event.target.closest('.repo-toggle');
+    if (!toggle || toggle.disabled) return;
+    const repo = toggle.dataset.repo;
+    const watched = state.watch.repos.some((entry) => entry.toLowerCase() === repo.toLowerCase());
+    const repos = watched
+      ? state.watch.repos.filter((entry) => entry.toLowerCase() !== repo.toLowerCase())
+      : state.watch.repos.concat(repo);
+    saveWatch({ repos });
   });
 
   document.addEventListener('keydown', (event) => {

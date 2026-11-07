@@ -269,7 +269,12 @@ func (s *Server) handleRepos(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "repos failed"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"repos": repos})
+	watch, err := s.store.Watch(r.Context())
+	if err != nil {
+		s.log.Warn("dashboard watch list failed", "err", err)
+		watch = store.Watch{All: true, Repos: []string{}}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"repos": repos, "watch": watch})
 }
 
 func (s *Server) handleRuntime(w http.ResponseWriter, r *http.Request) {
@@ -284,5 +289,6 @@ func (s *Server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/reviews/", s.protect(s.handleReview))
 	mux.HandleFunc("/api/repos", s.protect(s.handleRepos))
 	mux.HandleFunc("/api/runtime", s.protect(s.handleRuntime))
+	s.registerWatch(mux)
 	s.registerLearnings(mux)
 }

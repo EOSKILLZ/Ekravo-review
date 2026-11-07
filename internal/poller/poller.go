@@ -14,6 +14,10 @@ import (
 	"github.com/EOSKILLZ/ekravo-review/v2/internal/githubx"
 )
 
+// WatchFunc resolves the dashboard watch list: all reports that every
+// repository should be polled, otherwise repos is the selected subset.
+type WatchFunc func(ctx context.Context) (all bool, repos []string, err error)
+
 // Poller runs the polling loop.
 type Poller struct {
 	cfg     *config.Config
@@ -22,6 +26,7 @@ type Poller struct {
 	onPR    func(ctx context.Context, repo string, number int, sha string)
 	onCmd   func(ctx context.Context, repo string, number int, command string)
 	command *regexp.Regexp
+	watch   WatchFunc
 
 	lastSeen map[string]time.Time
 }
@@ -43,6 +48,10 @@ func New(cfg *config.Config, gh *githubx.Client, log *slog.Logger,
 		lastSeen: map[string]time.Time{},
 	}
 }
+
+// SetWatch overrides the configured GITHUB_REPO list with the watch list the
+// dashboard stores. Without it the poller keeps using the configuration.
+func (p *Poller) SetWatch(fn WatchFunc) { p.watch = fn }
 
 // Run blocks until ctx is cancelled.
 func (p *Poller) Run(ctx context.Context) {
@@ -68,12 +77,32 @@ func (p *Poller) Run(ctx context.Context) {
 }
 
 func (p *Poller) cycle(ctx context.Context) {
-	for _, repo := range p.cfg.GitHub.Repos {
+	for _, repo := range p.watchedRepos(ctx) {
 		if _, ignored := p.cfg.GitHub.IgnoreRepos[strings.ToLower(repo)]; ignored {
 			continue
 		}
 		p.pollRepo(ctx, repo)
 	}
+}
+
+// watchedRepos prefers the dashboard watch list. An unreadable setting falls
+// back to the configured repositories so a database hiccup cannot stop polling.
+func (p *Poller) watchedRepos(ctx context.Context) []string {
+	if p.watch == nil {
+		return p.cfg.GitHub.Repos
+	}
+	all, repos, err := p.watch(ctx)
+	if err != nil {
+		p.log.Warn("could not read watch list; using configured repositories", "err", err)
+		return p.cfg.GitHub.Repos
+	}
+	if all {
+		return p.cfg.GitHub.Repos
+	}
+	if len(repos) == 0 {
+		p.log.Debug("watch list is empty; nothing to poll")
+	}
+	return repos
 }
 
 func (p *Poller) pollRepo(ctx context.Context, repo string) {
