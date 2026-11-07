@@ -1,6 +1,6 @@
-module github.com/EOSKILLZ/ekravo-review/v2
+module github.com/ekravo/Ekravo-review/v2
 
-go 1.26.5
+go 1.26.10
 
 require (
 	github.com/odvcencio/gotreesitter v0.55.1

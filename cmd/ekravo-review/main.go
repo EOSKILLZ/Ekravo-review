@@ -9,10 +9,10 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/app"
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/config"
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/store"
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/version"
+	"github.com/ekravo/Ekravo-review/v2/internal/app"
+	"github.com/ekravo/Ekravo-review/v2/internal/config"
+	"github.com/ekravo/Ekravo-review/v2/internal/store"
+	"github.com/ekravo/Ekravo-review/v2/internal/version"
 )
 
 func main() {

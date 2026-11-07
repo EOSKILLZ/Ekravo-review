@@ -4,13 +4,18 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"net/url"
+	"strings"
 
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/config"
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/githubx"
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/repocontext"
+	"github.com/ekravo/Ekravo-review/v2/internal/config"
+	"github.com/ekravo/Ekravo-review/v2/internal/githubx"
+	"github.com/ekravo/Ekravo-review/v2/internal/repocontext"
 )
 
-type ghSource struct{ c *githubx.Client }
+type ghSource struct {
+	c       *githubx.Client
+	webBase string
+}
 
 func (g ghSource) RepoSizeKB(ctx context.Context, repo string) (int, error) {
 	return g.c.RepoSizeKB(ctx, repo)
@@ -40,6 +45,22 @@ func (g ghSource) GitAuth(ctx context.Context, repo string) (string, error) {
 	return g.c.GitAuthHeader(ctx, repo)
 }
 
+func (g ghSource) WebBaseURL() string { return g.webBase }
+
+// webBaseURL maps an API base to the web host used for git clones. GitHub.com
+// serves the API from api.github.com; Enterprise serves /api/v3 on the same
+// host as the web UI.
+func webBaseURL(apiBase string) string {
+	u, err := url.Parse(strings.TrimSpace(apiBase))
+	if err != nil || u.Host == "" {
+		return "https://github.com"
+	}
+	if strings.EqualFold(u.Host, "api.github.com") {
+		return "https://github.com"
+	}
+	return u.Scheme + "://" + u.Host
+}
+
 func newContextEngine(cfg *config.Config, gh *githubx.Client, log *slog.Logger) (*repocontext.Engine, error) {
 	if cfg.Context.Mode == "off" {
 		return nil, nil
@@ -65,5 +86,5 @@ func newContextEngine(cfg *config.Config, gh *githubx.Client, log *slog.Logger) 
 	if err != nil {
 		return nil, err
 	}
-	return repocontext.New(ghSource{c: gh}, opts, cache, log), nil
+	return repocontext.New(ghSource{c: gh, webBase: webBaseURL(cfg.GitHub.BaseURL)}, opts, cache, log), nil
 }

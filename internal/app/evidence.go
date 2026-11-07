@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/llm"
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/research"
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/review"
+	"github.com/ekravo/Ekravo-review/v2/internal/llm"
+	"github.com/ekravo/Ekravo-review/v2/internal/research"
+	"github.com/ekravo/Ekravo-review/v2/internal/review"
 )
 
 // verifyFindings runs the tool-use step: the model asks for web lookups on

@@ -13,17 +13,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/config"
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/diff"
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/githubx"
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/llm"
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/poller"
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/queue"
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/repocontext"
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/research"
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/review"
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/server"
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/store"
+	"github.com/ekravo/Ekravo-review/v2/internal/config"
+	"github.com/ekravo/Ekravo-review/v2/internal/diff"
+	"github.com/ekravo/Ekravo-review/v2/internal/githubx"
+	"github.com/ekravo/Ekravo-review/v2/internal/llm"
+	"github.com/ekravo/Ekravo-review/v2/internal/poller"
+	"github.com/ekravo/Ekravo-review/v2/internal/queue"
+	"github.com/ekravo/Ekravo-review/v2/internal/repocontext"
+	"github.com/ekravo/Ekravo-review/v2/internal/research"
+	"github.com/ekravo/Ekravo-review/v2/internal/review"
+	"github.com/ekravo/Ekravo-review/v2/internal/server"
+	"github.com/ekravo/Ekravo-review/v2/internal/store"
 )
 
 const (
@@ -111,19 +111,25 @@ func (a *App) Run(ctx context.Context) error {
 	a.pool.Start(ctx)
 
 	srv := server.New(a.cfg, a.log, a.metrics, server.Handlers{
-		OnPullRequest: func(ctx context.Context, repo string, number int, _ string, _ bool) {
+		OnPullRequest: func(ctx context.Context, repo string, number int, _ string, _ bool) error {
 			if !a.watching(ctx, repo) {
 				a.log.Debug("ignoring pull request from unwatched repository", "repo", repo, "pr", number)
-				return
+				return nil
 			}
-			a.enqueuePR(repo, number, false)
+			if err := a.enqueuePR(repo, number, false); err != nil {
+				return server.ErrQueueFull
+			}
+			return nil
 		},
-		OnCommand: func(ctx context.Context, repo string, number int, command string) {
+		OnCommand: func(ctx context.Context, repo string, number int, command string) error {
 			if !a.watching(ctx, repo) {
 				a.log.Debug("ignoring command from unwatched repository", "repo", repo, "pr", number)
-				return
+				return nil
 			}
-			a.enqueueCommand(repo, number, command)
+			if err := a.enqueueCommand(repo, number, command); err != nil {
+				return server.ErrQueueFull
+			}
+			return nil
 		},
 		Ready:          func(ctx context.Context) error { return a.st.Ping(ctx) },
 		AvailableRepos: a.gh.ListRepos,
@@ -201,32 +207,36 @@ func (a *App) watching(ctx context.Context, repo string) bool {
 	return false
 }
 
-func (a *App) enqueuePR(repo string, number int, force bool) {
+func (a *App) enqueuePR(repo string, number int, force bool) error {
 	key := fmt.Sprintf("%s#%d", repo, number)
-	if !a.pool.Submit(key, func(ctx context.Context) {
+	err := a.pool.SubmitOrJoin(key, func(ctx context.Context) {
 		jobCtx, cancel := context.WithTimeout(ctx, reviewTimeout)
 		defer cancel()
 		if err := a.ReviewPR(jobCtx, repo, number, force); err != nil {
 			a.metrics.Failures.Add(1)
 			a.log.Error("review failed", "repo", repo, "pr", number, "err", err)
 		}
-	}) {
-		a.log.Debug("job already queued or queue full", "key", key)
+	})
+	if err != nil {
+		a.log.Warn("review could not be queued", "key", key, "err", err)
 	}
+	return err
 }
 
-func (a *App) enqueueCommand(repo string, number int, command string) {
+func (a *App) enqueueCommand(repo string, number int, command string) error {
 	key := fmt.Sprintf("%s#%d#%s", repo, number, command)
-	if !a.pool.Submit(key, func(ctx context.Context) {
+	err := a.pool.SubmitOrJoin(key, func(ctx context.Context) {
 		jobCtx, cancel := context.WithTimeout(ctx, reviewTimeout)
 		defer cancel()
 		if err := a.HandleCommand(jobCtx, repo, number, command); err != nil {
 			a.metrics.Failures.Add(1)
 			a.log.Error("command failed", "repo", repo, "pr", number, "command", command, "err", err)
 		}
-	}) {
-		a.log.Debug("command already queued or queue full", "key", key)
+	})
+	if err != nil {
+		a.log.Warn("command could not be queued", "key", key, "err", err)
 	}
+	return err
 }
 
 // ReviewPR reviews one pull request. force skips the already-reviewed check,
@@ -357,7 +367,9 @@ func (a *App) ReviewPR(ctx context.Context, repo string, number int, force bool)
 	}
 
 	if failed == len(sections) {
-		return fmt.Errorf("all %d review sections failed", len(sections))
+		reason := fmt.Sprintf("all %d review sections failed", len(sections))
+		a.reportReviewFailure(ctx, repo, number, reason)
+		return fmt.Errorf("%s", reason)
 	}
 
 	limit := rc.MaxFindings
@@ -387,6 +399,7 @@ func (a *App) ReviewPR(ctx context.Context, repo string, number int, force bool)
 		Incremental: incremental,
 		Commit:      pr.Head.SHA,
 		Duration:    time.Since(started),
+		RepoURL:     a.cfg.Bot.RepoURL,
 	})
 	if len(summary) > maxBodyChars {
 		summary = summary[:maxBodyChars]
@@ -446,6 +459,16 @@ func (a *App) ReviewPR(ctx context.Context, repo string, number int, force bool)
 		"findings", len(findings), "model", modelUsed,
 		"incremental", incremental, "since", since)
 	return nil
+}
+
+// reportReviewFailure makes an incomplete review visible on the pull request
+// instead of leaving the author with no signal. The message deliberately does
+// not mention the bot handle so it cannot trigger a command loop.
+func (a *App) reportReviewFailure(ctx context.Context, repo string, number int, reason string) {
+	body := fmt.Sprintf("## 🔎 Ekravo Review — review failed\n\nI could not complete this review: %s. Nothing was approved or merged. Run the review command again to retry.\n", reason)
+	if _, err := a.gh.CreateIssueComment(ctx, repo, number, body); err != nil {
+		a.log.Warn("could not post review failure comment", "repo", repo, "pr", number, "err", err)
+	}
 }
 
 // canAutoMerge is deliberately strict: an approving review of the exact same
@@ -790,6 +813,7 @@ func metaOf(pr *githubx.PullRequest) review.Meta {
 	return review.Meta{
 		Number:       pr.Number,
 		Repo:         pr.Base.Repo.FullName,
+		URL:          pr.HTMLURL,
 		Title:        pr.Title,
 		Body:         pr.Body,
 		Author:       pr.User.Login,

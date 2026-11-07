@@ -17,12 +17,16 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/config"
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/store"
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/webui"
+	"github.com/ekravo/Ekravo-review/v2/internal/config"
+	"github.com/ekravo/Ekravo-review/v2/internal/store"
+	"github.com/ekravo/Ekravo-review/v2/internal/webui"
 )
 
 const maxWebhookBytes = 5 << 20
+
+// ErrQueueFull is returned by handlers when the bounded worker queue cannot
+// accept a delivery. The webhook endpoint turns it into 503 so GitHub retries.
+var ErrQueueFull = errors.New("review queue is full")
 
 // Metrics holds counters exported at /metrics.
 type Metrics struct {
@@ -37,8 +41,8 @@ type Metrics struct {
 
 // Handlers are the callbacks invoked for accepted deliveries.
 type Handlers struct {
-	OnPullRequest  func(ctx context.Context, repo string, number int, sha string, draft bool)
-	OnCommand      func(ctx context.Context, repo string, number int, command string)
+	OnPullRequest  func(ctx context.Context, repo string, number int, sha string, draft bool) error
+	OnCommand      func(ctx context.Context, repo string, number int, command string) error
 	Ready          func(ctx context.Context) error
 	AvailableRepos func(ctx context.Context) ([]string, error)
 	Store          *store.Store
@@ -129,7 +133,12 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.WriteString(w, "ok\n")
 }
 
-func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.Dashboard.Token != "" && !s.authorized(r) {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="metrics"`)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 	write := func(name, help string, v int64) {
 		fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s counter\n%s %d\n", name, help, name, name, v)
@@ -179,6 +188,13 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 
 	if err := s.dispatch(event, body); err != nil {
 		s.metrics.Rejected.Add(1)
+		if errors.Is(err, ErrQueueFull) {
+			w.Header().Set("Retry-After", "30")
+			s.log.Warn("review queue unavailable; asking GitHub to redeliver",
+				"event", event, "delivery", r.Header.Get("X-GitHub-Delivery"))
+			http.Error(w, "review queue unavailable", http.StatusServiceUnavailable)
+			return
+		}
 		s.log.Warn("rejected webhook payload", "event", event, "err", err)
 		http.Error(w, "bad payload", http.StatusBadRequest)
 		return
@@ -222,7 +238,7 @@ func (s *Server) dispatch(event string, body []byte) error {
 			return nil
 		}
 		if s.handlers.OnPullRequest != nil {
-			s.handlers.OnPullRequest(context.Background(), repo, p.PullRequest.Number,
+			return s.handlers.OnPullRequest(context.Background(), repo, p.PullRequest.Number,
 				p.PullRequest.Head.SHA, p.PullRequest.Draft)
 		}
 
@@ -239,11 +255,20 @@ func (s *Server) dispatch(event string, body []byte) error {
 			Comment struct {
 				Body string `json:"body"`
 			} `json:"comment"`
+			Sender struct {
+				Login string `json:"login"`
+				Type  string `json:"type"`
+			} `json:"sender"`
 		}
 		if err := json.Unmarshal(body, &p); err != nil {
 			return err
 		}
 		if p.Action != "created" || len(p.Issue.PullRequest) == 0 {
+			return nil
+		}
+		// Never react to our own comments: a failure notice or a review body can
+		// contain the command text and would otherwise loop.
+		if p.Sender.Type == "Bot" || strings.HasSuffix(p.Sender.Login, "[bot]") {
 			return nil
 		}
 		m := s.command.FindStringSubmatch(p.Comment.Body)
@@ -259,7 +284,7 @@ func (s *Server) dispatch(event string, body []byte) error {
 			if args := strings.TrimSpace(m[2]); args != "" && (cmd == "learn" || cmd == "forget") {
 				cmd += " " + args
 			}
-			s.handlers.OnCommand(context.Background(), repo, p.Issue.Number, cmd)
+			return s.handlers.OnCommand(context.Background(), repo, p.Issue.Number, cmd)
 		}
 
 	default:

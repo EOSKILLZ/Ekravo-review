@@ -13,6 +13,22 @@ func validConfig() *Config {
 	}
 }
 
+func TestValidateAPIKeyOnlyRequiredForHostedEkravo(t *testing.T) {
+	local := validConfig()
+	local.LLM.APIKey = ""
+	local.LLM.BaseURL = "http://127.0.0.1:11434/v1"
+	if err := local.Validate(); err != nil {
+		t.Fatalf("keyless local endpoint rejected: %v", err)
+	}
+
+	hosted := validConfig()
+	hosted.LLM.APIKey = ""
+	hosted.LLM.BaseURL = "https://ekravo.com/v1"
+	if err := hosted.Validate(); err == nil || !strings.Contains(err.Error(), "LLM_API_KEY") {
+		t.Fatalf("hosted endpoint should require a key, got %v", err)
+	}
+}
+
 func TestValidateAutoMergeMethod(t *testing.T) {
 	c := validConfig()
 	c.Bot.AutoMergeMethod = "octopus"

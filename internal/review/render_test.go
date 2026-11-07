@@ -15,6 +15,7 @@ func TestSummaryRendersGithubMarkdown(t *testing.T) {
 		Handle:   "ekravo",
 		Commit:   "abcdef1234567890",
 		Duration: 1400 * time.Millisecond,
+		RepoURL:  "https://example.com/ekravo-review",
 	}
 	out := Summary(in)
 	t.Logf("\n%s", out)
@@ -27,6 +28,7 @@ func TestSummaryRendersGithubMarkdown(t *testing.T) {
 		"| 🟠 High | `app/main.go:2` |",
 		"commit `abcdef1`",
 		"@ekravo review",
+		"[Ekravo Review](https://example.com/ekravo-review)",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("summary missing %q:\n%s", want, out)
@@ -49,6 +51,9 @@ func TestSummaryApprovalCallout(t *testing.T) {
 	}
 	if !strings.Contains(out, "**Approved**") {
 		t.Errorf("approval is not stated in the callout:\n%s", out)
+	}
+	if !strings.Contains(out, "[Ekravo Review](https://github.com/ekravo/Ekravo-review)") {
+		t.Errorf("footer should fall back to the canonical repository:\n%s", out)
 	}
 }
 

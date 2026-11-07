@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/config"
+	"github.com/ekravo/Ekravo-review/v2/internal/config"
 )
 
 func testClient(t *testing.T, srv *httptest.Server, models ...string) *Client {

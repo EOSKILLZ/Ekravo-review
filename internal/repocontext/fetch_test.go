@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/diff"
+	"github.com/ekravo/Ekravo-review/v2/internal/diff"
 )
 
 type fakeSource struct {
@@ -31,6 +31,7 @@ func (f *fakeSource) FileAt(context.Context, string, string, string) ([]byte, er
 	return nil, nil
 }
 func (f *fakeSource) GitAuth(context.Context, string) (string, error) { return "", nil }
+func (f *fakeSource) WebBaseURL() string                              { return "https://github.com" }
 
 func makeTar(t *testing.T, prefix string, entries map[string]string) []byte {
 	t.Helper()

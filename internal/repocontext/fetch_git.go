@@ -26,7 +26,11 @@ func fetchGit(ctx context.Context, src Source, repo, ref, dir string, changed []
 		return err
 	}
 	clean := strings.TrimSuffix(repo, ".git")
-	cloneURL := "https://github.com/" + clean + ".git"
+	base := strings.TrimRight(src.WebBaseURL(), "/")
+	if base == "" {
+		base = "https://github.com"
+	}
+	cloneURL := base + "/" + clean + ".git"
 	if err := runGit(ctx, git, dir, nil, "remote", "add", "origin", cloneURL); err != nil {
 		return err
 	}
@@ -40,7 +44,7 @@ func fetchGit(ctx context.Context, src Source, repo, ref, dir string, changed []
 	if auth != "" {
 		env = append(env,
 			"GIT_CONFIG_COUNT=1",
-			"GIT_CONFIG_KEY_0=http.https://github.com/.extraheader",
+			"GIT_CONFIG_KEY_0=http."+base+"/.extraheader",
 			"GIT_CONFIG_VALUE_0="+auth,
 		)
 	}

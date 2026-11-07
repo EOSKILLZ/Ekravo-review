@@ -13,7 +13,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.x"
+          go-version: "1.26.10"
           cache: true
 
       - name: Format
@@ -24,6 +24,9 @@ jobs:
 
       - name: Test
         run: go test -race ./...
+
+      - name: Vulnerability scan
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
       - name: Build
         run: go build -trimpath ./cmd/ekravo-review

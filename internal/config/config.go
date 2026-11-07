@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -205,7 +206,7 @@ func (c *Config) Validate() error {
 	if len(c.GitHub.Repos) == 0 && c.Bot.WebhookSecret == "" {
 		problems = append(problems, "set GITHUB_REPO (owner/repo[,owner/repo2]) or WEBHOOK_SECRET for webhook mode")
 	}
-	if c.LLM.APIKey == "" {
+	if c.LLM.APIKey == "" && hostedLLM(c.LLM.BaseURL) {
 		problems = append(problems, "set LLM_API_KEY (create one at https://ekravo.com)")
 	}
 	if len(c.LLM.Models) == 0 {
@@ -260,6 +261,18 @@ func (c *Config) Validate() error {
 
 // WebhookMode reports whether the bot should serve webhooks instead of polling.
 func (c *Config) WebhookMode() bool { return c.Bot.WebhookSecret != "" }
+
+// hostedLLM reports whether the endpoint is the managed Ekravo gateway, which
+// always needs a key. Local OpenAI-compatible servers (Ollama, LM Studio,
+// llama.cpp, vLLM) commonly run without one.
+func hostedLLM(baseURL string) bool {
+	u, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil || u.Host == "" {
+		return true
+	}
+	host := strings.TrimPrefix(strings.ToLower(u.Host), "www.")
+	return host == "ekravo.com" || strings.HasSuffix(host, ".ekravo.com")
+}
 
 func loadPrivateKey() string {
 	if path := os.Getenv("GITHUB_APP_PRIVATE_KEY_PATH"); path != "" {

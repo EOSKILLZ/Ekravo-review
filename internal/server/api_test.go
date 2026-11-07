@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/config"
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/store"
+	"github.com/ekravo/Ekravo-review/v2/internal/config"
+	"github.com/ekravo/Ekravo-review/v2/internal/store"
 )
 
 func dashboardServer(t *testing.T, token string) (*Server, *store.Store) {
@@ -60,6 +60,12 @@ func TestDashboardAPIRefusesAnonymousRequests(t *testing.T) {
 	}
 	if code := get(s.Handler(), "/api/overview", "wrong").Code; code != http.StatusUnauthorized {
 		t.Fatalf("wrong token status = %d, want 401", code)
+	}
+	if code := get(s.Handler(), "/metrics", "").Code; code != http.StatusUnauthorized {
+		t.Fatalf("anonymous metrics status = %d, want 401", code)
+	}
+	if code := get(s.Handler(), "/metrics", "super-secret-token").Code; code != http.StatusOK {
+		t.Fatalf("authenticated metrics status = %d, want 200", code)
 	}
 }
 

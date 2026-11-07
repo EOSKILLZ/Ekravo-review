@@ -4,9 +4,20 @@ package queue
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 )
+
+// ErrFull means the bounded queue has no room for another job. Callers can use
+// it to reject the webhook delivery so GitHub retries instead of losing work.
+var ErrFull = errors.New("review queue is full")
+
+// ErrClosed means shutdown has started; no new work is accepted.
+var ErrClosed = errors.New("review queue is closed")
+
+// errBusy means the same key is already queued or running.
+var errBusy = errors.New("job already queued")
 
 // Job is a unit of work.
 type Job func(ctx context.Context)
@@ -74,27 +85,41 @@ func (p *Pool) run(ctx context.Context, it item) {
 // Submit enqueues a job unless the key is already queued/running or the queue
 // is full. It never blocks.
 func (p *Pool) Submit(key string, job Job) bool {
+	return p.enqueue(key, job, false) == nil
+}
+
+// SubmitOrJoin enqueues a job and treats an already-queued key as accepted,
+// because the queued work already covers this delivery. Only a full or closed
+// queue is an error, which lets the HTTP layer return 503 so GitHub redelivers.
+func (p *Pool) SubmitOrJoin(key string, job Job) error {
+	return p.enqueue(key, job, true)
+}
+
+func (p *Pool) enqueue(key string, job Job, join bool) error {
 	p.mu.Lock()
 	if p.closed {
 		p.mu.Unlock()
-		return false
+		return ErrClosed
 	}
 	if _, busy := p.inflight[key]; busy {
 		p.mu.Unlock()
-		return false
+		if join {
+			return nil
+		}
+		return errBusy
 	}
 	p.inflight[key] = struct{}{}
 	p.mu.Unlock()
 
 	select {
 	case p.ch <- item{key: key, job: job}:
-		return true
+		return nil
 	default:
 		p.mu.Lock()
 		delete(p.inflight, key)
 		p.mu.Unlock()
 		p.log.Warn("queue full, rejecting job", "key", key)
-		return false
+		return ErrFull
 	}
 }
 

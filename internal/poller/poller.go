@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/config"
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/githubx"
+	"github.com/ekravo/Ekravo-review/v2/internal/config"
+	"github.com/ekravo/Ekravo-review/v2/internal/githubx"
 )
 
 // WatchFunc resolves the dashboard watch list: all reports that every

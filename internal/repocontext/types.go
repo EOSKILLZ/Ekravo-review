@@ -73,6 +73,9 @@ type Source interface {
 	FileAt(ctx context.Context, repo, path, ref string) ([]byte, error)
 	// GitAuth returns the value for the git http.extraheader config, or "".
 	GitAuth(ctx context.Context, repo string) (string, error)
+	// WebBaseURL is the web host used for git clones, e.g. https://github.com
+	// or https://ghe.example.com. Enterprise serves its API under /api/v3.
+	WebBaseURL() string
 }
 
 // Options bounds what the engine may fetch, parse, and send.

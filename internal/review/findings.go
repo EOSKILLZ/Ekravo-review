@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/config"
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/diff"
+	"github.com/ekravo/Ekravo-review/v2/internal/config"
+	"github.com/ekravo/Ekravo-review/v2/internal/diff"
 )
 
 // Severity is the impact of a finding.
@@ -347,6 +347,7 @@ func ReviewEvent(decision string, autoApprove bool) string {
 type Meta struct {
 	Number       int
 	Repo         string
+	URL          string
 	Title        string
 	Body         string
 	Author       string

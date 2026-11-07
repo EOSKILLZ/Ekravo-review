@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/diff"
+	"github.com/ekravo/Ekravo-review/v2/internal/diff"
 )
 
 const (

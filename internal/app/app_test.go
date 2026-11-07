@@ -3,8 +3,8 @@ package app
 import (
 	"testing"
 
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/diff"
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/githubx"
+	"github.com/ekravo/Ekravo-review/v2/internal/diff"
+	"github.com/ekravo/Ekravo-review/v2/internal/githubx"
 )
 
 func TestIgnoredMatchesPathsAndBasenames(t *testing.T) {

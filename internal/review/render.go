@@ -62,6 +62,9 @@ type SummaryInput struct {
 	Incremental bool
 	Commit      string
 	Duration    time.Duration
+	// RepoURL is the project link shown in the footer. Empty falls back to the
+	// canonical repository, so self-hosted forks can point at their own copy.
+	RepoURL string
 }
 
 // Summary renders the review body shown alongside the inline comments. It is
@@ -83,7 +86,10 @@ func Summary(in SummaryInput) string {
 	if repo == "" {
 		repo = in.Meta.Base
 	}
-	prURL := fmt.Sprintf("https://github.com/%s/pull/%d", repo, in.Meta.Number)
+	prURL := in.Meta.URL
+	if prURL == "" {
+		prURL = fmt.Sprintf("https://github.com/%s/pull/%d", repo, in.Meta.Number)
+	}
 	fmt.Fprintf(&b, "**[#%d · %s](%s)**", in.Meta.Number, in.Meta.Title, prURL)
 	if in.Meta.Author != "" {
 		fmt.Fprintf(&b, " · @%s", in.Meta.Author)
@@ -138,7 +144,11 @@ func Summary(in SummaryInput) string {
 	}
 	meta = append(meta, time.Now().UTC().Format("2006-01-02 15:04 UTC"))
 	fmt.Fprintf(&b, "<sub>🔎 %s</sub>\n", strings.Join(meta, " · "))
-	fmt.Fprintf(&b, "<sub>`@%s review` · `@%s explain` · `@%s summarize` · [Ekravo Review](https://github.com/EOSKILLZ/ekravo-review)</sub>\n", handle, handle, handle)
+	repoURL := strings.TrimSpace(in.RepoURL)
+	if repoURL == "" {
+		repoURL = "https://github.com/ekravo/Ekravo-review"
+	}
+	fmt.Fprintf(&b, "<sub>`@%s review` · `@%s explain` · `@%s summarize` · [Ekravo Review](%s)</sub>\n", handle, handle, handle, repoURL)
 	return b.String()
 }
 

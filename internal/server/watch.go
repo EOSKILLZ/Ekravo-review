@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/store"
+	"github.com/ekravo/Ekravo-review/v2/internal/store"
 )
 
 const maxWatchRepos = 200

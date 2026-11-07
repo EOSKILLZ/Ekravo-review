@@ -4,6 +4,8 @@ services:
       context: .
       args:
         VERSION: ${VERSION:-dev}
+        COMMIT: ${COMMIT:-none}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
     image: ekravo-review:latest
     container_name: ekravo-review
     restart: unless-stopped

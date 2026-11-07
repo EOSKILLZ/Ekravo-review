@@ -3,8 +3,8 @@ package app
 import (
 	"testing"
 
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/githubx"
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/review"
+	"github.com/ekravo/Ekravo-review/v2/internal/githubx"
+	"github.com/ekravo/Ekravo-review/v2/internal/review"
 )
 
 func TestAutoMergeEligible(t *testing.T) {

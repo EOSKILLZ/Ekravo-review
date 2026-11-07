@@ -8,9 +8,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/review"
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/store"
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/version"
+	"github.com/ekravo/Ekravo-review/v2/internal/review"
+	"github.com/ekravo/Ekravo-review/v2/internal/store"
+	"github.com/ekravo/Ekravo-review/v2/internal/version"
 )
 
 const sessionCookie = "ekravo_dash"
@@ -140,13 +140,16 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid token"})
 			return
 		}
+		// TLS usually terminates at a reverse proxy, so trust the standard
+		// forwarded header as well as a direct TLS connection.
+		secure := r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 		http.SetCookie(w, &http.Cookie{
 			Name:     sessionCookie,
 			Value:    s.cfg.Dashboard.Token,
 			Path:     "/",
 			HttpOnly: true,
 			SameSite: http.SameSiteLaxMode,
-			Secure:   r.TLS != nil,
+			Secure:   secure,
 			MaxAge:   7 * 24 * 60 * 60,
 		})
 		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})

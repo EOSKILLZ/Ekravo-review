@@ -3,7 +3,7 @@ package review
 import (
 	"testing"
 
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/diff"
+	"github.com/ekravo/Ekravo-review/v2/internal/diff"
 )
 
 const patch = "@@ -1,2 +1,4 @@\n context\n+added one\n+added two\n context two\n"

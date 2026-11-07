@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/diff"
+	"github.com/ekravo/Ekravo-review/v2/internal/diff"
 )
 
 // importBreakNotes reports exports removed from a changed file that another

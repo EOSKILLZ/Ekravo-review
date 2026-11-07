@@ -9,7 +9,7 @@ the validated findings, so the model cannot announce an approval on its own.
 
 ## Run
 
-You need Go 1.26+, a GitHub App (or a personal token) and an [Ekravo](https://ekravo.com)
+You need Go 1.26.10+, a GitHub App (or a personal token) and an [Ekravo](https://ekravo.com)
 API key.
 
     cp .env.example .env
@@ -18,6 +18,10 @@ API key.
     go run ./cmd/ekravo-review
 
 Dashboard: http://localhost:8090
+
+First time? [Create and install the GitHub App](docs/GITHUB_APP.md) — it lists the
+exact permissions and webhook events. TLS, backups, upgrades, metrics auth and
+the data flow are covered in [docs/OPERATIONS.md](docs/OPERATIONS.md).
 
 The Repositories page lists every repository your GitHub App installations can
 reach, reviewed or not. Only watched repositories get reviewed: leave *Watch all
@@ -75,6 +79,17 @@ Everything is documented in `.env.example`. Per-repo overrides go in a
 No linters or SAST. GitHub only. One process per database. Context retrieval is
 name-based and bounded: it reduces missed callers, it does not prove absence.
 Web evidence can be wrong. Auto-merge does not wait for pending checks.
+
+## Data and privacy
+
+A review sends the pull request diff, selected surrounding code, and repository
+metadata to the LLM endpoint configured by `LLM_BASE_URL` (Ekravo by default).
+When `WEB_RESEARCH=true`, externally checkable claims (versions, CVEs, API
+existence) may be sent to the same provider's web search. Local logic findings
+are never sent for verification. Review history, learnings, and settings live in
+one SQLite file under `DB_PATH`. Set `DASHBOARD_TOKEN` before exposing the
+dashboard, and see [docs/OPERATIONS.md](docs/OPERATIONS.md) for the backup and
+exposure checklist.
 
 ## License
 

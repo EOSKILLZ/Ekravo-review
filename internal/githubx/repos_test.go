@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/config"
+	"github.com/ekravo/Ekravo-review/v2/internal/config"
 )
 
 func TestListReposFromToken(t *testing.T) {

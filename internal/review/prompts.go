@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/config"
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/diff"
+	"github.com/ekravo/Ekravo-review/v2/internal/config"
+	"github.com/ekravo/Ekravo-review/v2/internal/diff"
 )
 
 const schema = `{"findings":[{"file":"path/to/file","line":42,` +

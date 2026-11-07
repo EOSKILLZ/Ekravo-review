@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/store"
+	"github.com/ekravo/Ekravo-review/v2/internal/store"
 )
 
 func watchRequest(t *testing.T, h http.Handler, method, path, body string) *httptest.ResponseRecorder {

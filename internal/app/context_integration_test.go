@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/config"
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/diff"
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/repocontext"
+	"github.com/ekravo/Ekravo-review/v2/internal/config"
+	"github.com/ekravo/Ekravo-review/v2/internal/diff"
+	"github.com/ekravo/Ekravo-review/v2/internal/repocontext"
 )
 
 type testSource struct{ tarball []byte }
@@ -29,6 +29,7 @@ func (s testSource) FileAt(context.Context, string, string, string) ([]byte, err
 	return nil, nil
 }
 func (s testSource) GitAuth(context.Context, string) (string, error) { return "", nil }
+func (s testSource) WebBaseURL() string                              { return "https://github.com" }
 
 func testTar(t *testing.T) []byte {
 	t.Helper()

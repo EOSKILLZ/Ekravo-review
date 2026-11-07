@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/diff"
+	"github.com/ekravo/Ekravo-review/v2/internal/diff"
 )
 
 var symbolFromLine = regexp.MustCompile(`^\s*(?:export\s+)?(?:async\s+)?(?:func|def|function|class|interface|struct|type|trait|object|module|const|let|var|enum)\s+\(?([A-Za-z_$][\w$]*)`)

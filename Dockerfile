@@ -1,4 +1,4 @@
-FROM golang:1.26-alpine AS build
+FROM golang:1.26.10-alpine AS build
 
 WORKDIR /src
 
@@ -8,8 +8,10 @@ RUN go mod download
 COPY . .
 
 ARG VERSION=dev
+ARG COMMIT=none
+ARG BUILD_DATE=unknown
 RUN CGO_ENABLED=0 go build -trimpath \
-    -ldflags "-s -w -X github.com/EOSKILLZ/ekravo-review/v2/internal/version.Version=${VERSION}" \
+    -ldflags "-s -w -X github.com/ekravo/Ekravo-review/v2/internal/version.Version=${VERSION} -X github.com/ekravo/Ekravo-review/v2/internal/version.Commit=${COMMIT} -X github.com/ekravo/Ekravo-review/v2/internal/version.Date=${BUILD_DATE}" \
     -o /out/ekravo-review ./cmd/ekravo-review
 
 # git is required for monorepo partial clones and sparse checkout. The binary

@@ -3,7 +3,7 @@ package app
 import (
 	"testing"
 
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/diff"
+	"github.com/ekravo/Ekravo-review/v2/internal/diff"
 )
 
 func TestBatchChunksPacksByBudget(t *testing.T) {

@@ -23,7 +23,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/EOSKILLZ/ekravo-review/v2/internal/config"
+	"github.com/ekravo/Ekravo-review/v2/internal/config"
 )
 
 const userAgent = "ekravo-review-v2 (+https://github.com/ekravo/Ekravo-review)"
@@ -68,6 +68,10 @@ type installationRef struct {
 	id      int64
 	expires time.Time
 }
+
+// BaseURL returns the REST API base URL without a trailing slash. Callers use
+// it to derive the web host for clone URLs on GitHub Enterprise.
+func (c *Client) BaseURL() string { return c.baseURL }
 
 // New builds a client from either a personal token or App credentials.
 func New(cfg config.GitHub) (*Client, error) {
